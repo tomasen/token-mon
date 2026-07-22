@@ -22,6 +22,7 @@ needed. Use --no-usage to disable the endpoint (transcripts only), or --plan /
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import threading
@@ -513,6 +514,68 @@ class CodexUsage:
             time.sleep(backoff)
 
 
+class AcctEstimator:
+    """Best-effort estimate of ACCOUNT-WIDE tokens, which no provider exposes.
+
+    Principle: local tokens are a subset of account tokens, so any observed
+    (local tokens) / (official %) ratio is a LOWER bound on the account's
+    tokens-per-percent. We record the best ratio ever seen — from cumulative
+    window readings and from deltas between consecutive official readings
+    (intervals where only this machine was active converge to the true ratio).
+    Denominators are padded for the official %'s integer rounding, so the
+    estimate stays a floor, never an overstatement. Best ratios persist to disk
+    so the estimate sharpens over days, not per-run."""
+
+    def __init__(self, path):
+        self.path = path
+        self.lock = threading.Lock()
+        self.best = {}   # key -> tokens per 1% of the account limit
+        self.last = {}   # key -> (pct, tokens) anchor for delta samples
+        try:
+            d = json.load(open(path))
+            self.best = {k: float(v) for k, v in d.get("best", {}).items()}
+        except Exception:
+            pass
+
+    def _save(self):
+        try:
+            tmp = str(self.path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"best": self.best}, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def sample(self, key, local_tokens, pct):
+        if pct is None or local_tokens is None:
+            return
+        with self.lock:
+            updated = False
+            if pct >= 2:
+                r = local_tokens / (pct + 0.5)          # rounding-safe floor
+                if r > self.best.get(key, 0):
+                    self.best[key] = r
+                    updated = True
+            lp = self.last.get(key)
+            if lp is None or pct < lp[0] or local_tokens < lp[1]:
+                self.last[key] = (pct, local_tokens)    # window reset / first sight
+            elif pct - lp[0] >= 2:
+                r = (local_tokens - lp[1]) / (pct - lp[0] + 1.0)
+                if r > self.best.get(key, 0):
+                    self.best[key] = r
+                    updated = True
+                self.last[key] = (pct, local_tokens)
+            if updated:
+                self._save()
+
+    def estimate(self, key, pct, local_tokens):
+        r = self.best.get(key)
+        if not r or pct is None:
+            return None
+        # account usage can never be below what this machine alone produced
+        return {"tokens": max(pct * r, local_tokens or 0), "limit": 100 * r}
+
+
 def ev_total(e):
     return e["in"] + e["out"] + e["cw"] + e["cr"]
 
@@ -571,6 +634,7 @@ class State:
         self.fallback_limit = fallback_limit
         self.codex_scanner = codex_scanner
         self.codex_usage = codex_usage
+        self.est = AcctEstimator(Path(__file__).parent / ".state.json")
         self._cache = (0.0, None)
         self.lock = threading.Lock()
 
@@ -606,13 +670,18 @@ class State:
                                "resets_at": a.get("resets_at")})
         # Zero rows say nothing: drop models with no usage and no cap consumption.
         models = [m for m in models if m["total"] > 0 or (m.get("pct") or 0) > 0]
+        tokens = agg(win_events)
+        cx_pct = win.get("pct") if win else None
+        est_key = f"codex_{win['name']}" if win else "codex"
+        self.est.sample(est_key, tokens["total"], cx_pct)
         return {
             "ok": bool(cu.get("ok")),
             "error": cu.get("error"),
             "plan": cu.get("plan"),
             "window": win,
-            "tokens": agg(win_events),
+            "tokens": tokens,
             "models": models,
+            "acctEst": self.est.estimate(est_key, cx_pct, tokens["total"]),
             "meta": {"files": files, "events": len(events)},
         }
 
@@ -677,6 +746,12 @@ class State:
         weekly_limit = official.get("weekly_limit_calibrated") if off_ok else None
         week_pct = (week_tokens["total"] / weekly_limit * 100) if weekly_limit else None
 
+        # Feed the account-wide estimator with (local tokens, OFFICIAL %) pairs.
+        s_off = (official.get("session") or {}).get("pct") if off_ok else None
+        w_off = weekly_all.get("pct") if off_ok else None
+        self.est.sample("claude_5h", session_tokens["total"], s_off)
+        self.est.sample("claude_weekly", week_tokens["total"], w_off)
+
         burn_cut = now - timedelta(minutes=10)
         per_sec = sum(ev_total(e) for e in events if e["ts"] >= burn_cut) / 600.0
 
@@ -701,6 +776,7 @@ class State:
                 "limitLabel": limit_label,
                 "limitSource": limit_source,
                 "pct": (session_tokens["total"] / limit * 100) if limit else None,
+                "acctEst": self.est.estimate("claude_5h", s_off, session_tokens["total"]),
             },
             "week": {
                 "start": wstart.isoformat(),
@@ -713,6 +789,7 @@ class State:
                 "severity": weekly_all.get("severity", "normal"),
                 "scoped": official.get("weekly_models", []) if off_ok else [],
                 "source": "calibrated" if weekly_limit else "estimate",
+                "acctEst": self.est.estimate("claude_weekly", w_off, week_tokens["total"]),
             },
             "burn": {"perSec": per_sec, "perMin": per_sec * 60},
             "spark": spark,

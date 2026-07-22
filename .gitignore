@@ -3,3 +3,5 @@ claude-mon.log
 __pycache__/
 *.pyc
 .DS_Store
+.state.json
+.state.json.tmp

@@ -104,6 +104,11 @@ Manage it: `systemctl --user status token-mon` · `journalctl --user -u token-mo
 - **Percentages are approximate** (shown with a `≈`) — the underlying limits aren't
   published, so they're the official percentage sharpened with your exact tokens.
   Read a percentage as "about right," a token count as exact.
+- **The "account-wide: ≥ …" line is a best-effort estimate.** Neither provider
+  exposes absolute account numbers, so token-mon relates your local tokens to the
+  official percentage over time and reports a floor ("at least this many"). It
+  ratchets upward as evidence accumulates (state persists in `.state.json`) and is
+  most accurate when this machine does most of your usage.
 
 ## Privacy & caveats
 

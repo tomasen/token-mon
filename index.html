@@ -73,6 +73,8 @@
   .unit { font-size:.30em; font-weight:600; color:var(--muted); margin-left:.4em; margin-bottom:.26em; letter-spacing:.02em; white-space:nowrap; }
   .hero-pct { font-size:14px; color:var(--ink-2); font-variant-numeric:tabular-nums; margin:3px 0 14px; }
   .hero-pct small { color:var(--muted); font-weight:400; }
+  .hero-est { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; margin:-10px 0 13px; }
+  .hero-est:empty { display:none; }
   .meter { height:10px; border-radius:5px; background:var(--track); overflow:hidden; }
   .meter.sm { height:7px; }
   .meter .fill { height:100%; width:0%; background:var(--accent); border-radius:5px; transition:width .5s cubic-bezier(.22,1,.36,1), background-color .4s; }
@@ -141,6 +143,7 @@
     <div class="row-between"><div class="label">Claude · This week</div><div class="reset" id="wkReset"></div></div>
     <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens · local</span></div>
     <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit · account-wide</small></div>
+    <div class="hero-est" id="wkEst"></div>
     <div class="meter"><div class="fill" id="wkFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="wkModelWrap"></div>
@@ -151,6 +154,7 @@
     <div class="row-between"><div class="label">Claude · Last 5 hours</div><div class="reset" id="sessReset"></div></div>
     <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens · local</span></div>
     <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit · account-wide</small></div>
+    <div class="hero-est" id="sessEst"></div>
     <div class="meter"><div class="fill" id="sessFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="modelWrap"></div>
@@ -161,6 +165,7 @@
     <div class="row-between"><div class="label">Codex · <span id="cxPlan">–</span></div><div class="reset" id="cxReset"></div></div>
     <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit">tokens · local</span></div>
     <div class="hero-pct">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit · account-wide</small></div>
+    <div class="hero-est" id="cxEst"></div>
     <div class="meter"><div class="fill" id="cxFill"></div></div>
     <div class="bymodel-head" id="cxByHead" style="display:none">by model</div>
     <div id="cxModelWrap"></div>
@@ -195,7 +200,10 @@
       <p><b>Local vs account-wide.</b> The <b>≈percentages are account-wide</b> — they're the official
       figures, so they include every device, the web app, and mobile. The <b>token counts cover only this
       machine</b> (what its local logs contain). If you also use Claude or Codex elsewhere, the percentage will
-      read higher than these token counts alone would suggest — that's expected, not a bug.</p>
+      read higher than these token counts alone would suggest — that's expected, not a bug. The
+      <b>“account-wide: ≥ …” line is a best-effort estimate</b>: neither provider publishes absolute account
+      numbers, so it's derived by relating your local tokens to the official percentage over time. It's a
+      floor that sharpens the longer token-mon runs.</p>
       <p><b>Codex.</b> If OpenAI's Codex CLI is installed, its usage appears the same way — exact tokens from
       <code>~/.codex/sessions</code>, official percentages from your own ChatGPT login.</p>
       <p><b>Private.</b> Everything is computed locally from <code>~/.claude</code> and <code>~/.codex</code>;
@@ -308,12 +316,14 @@ function onSnapshot(s){
   wkTok.set(fmt(week.tokens.total));
   const wpct = week.pct==null ? 0 : week.pct;
   const wf=el("wkFill"); wf.className="fill "+sevClass(week.severity, wpct); wf.style.width=Math.min(100,wpct)+"%";
+  setEst("wkEst", week.acctEst, week.tokens.total);
   renderModelTickers("wkModelWrap", week.models||[], stWk, {limit:week.limit, total:week.tokens.total, scoped:week.scoped||[], noun:"weekly"});
 
   // LAST 5 HOURS — same shape
   sessTok.set(fmt(sess.tokens.total));
   const spct = sess.pct==null ? 0 : sess.pct;
   const sf=el("sessFill"); sf.className="fill "+sevClass(off.session&&off.session.severity, spct); sf.style.width=Math.min(100,spct)+"%";
+  setEst("sessEst", sess.acctEst, sess.tokens.total);
   renderModelTickers("modelWrap", sess.models||[], st5h, {limit:sess.limit, total:sess.tokens.total, scoped:[], noun:"5-hour"});
 
   renderCodex(s.codex);
@@ -363,6 +373,13 @@ function renderModelTickers(wrapId, models, st, opts){
   }
 }
 
+function setEst(id, est, localTok){
+  const n=el(id);
+  if(!est || !est.tokens){ n.textContent=""; return; }
+  const v=Math.max(est.tokens, localTok||0);
+  n.textContent=`account-wide: ≥ ${compact(v)} tokens of ~${compact(est.limit)} · estimated`;
+}
+
 function renderCodex(cx){
   const card=el("cxCard");
   if(!cx || !cx.ok){ card.style.display="none"; return; }
@@ -373,6 +390,7 @@ function renderCodex(cx){
   el("cxReset").dataset.reset=w.resets_at||"";
   const pct=w.pct==null?0:w.pct;
   el("cxPctV").textContent=Number(pct).toFixed(1);
+  setEst("cxEst", cx.acctEst, cx.tokens.total);
   const f=el("cxFill"); f.className="fill "+sevClass(null,pct); f.style.width=Math.min(100,pct)+"%";
   cxTok.set(fmt(cx.tokens.total));
   const models=cx.models||[];
