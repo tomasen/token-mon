@@ -362,19 +362,20 @@ function frame(t){
   for(const k in st5h.ods) st5h.ods[k].od.tick(ease);
   for(const k in stWk.ods) stWk.ods[k].od.tick(ease);
 }
-// One consistent format everywhere: D H M S, largest non-zero unit first,
-// always down to seconds — e.g. "resets in 1D 6H 23M 12S", "resets in 2H 5M 20S".
+// One consistent format everywhere: largest non-zero unit first, at most three
+// units — so with days present the seconds drop off.
+// e.g. "resets in 1d 6h 23m", "resets in 2h 5m 20s", "resets in 10m 5s".
 function fmtCountdown(iso){
   if(!iso) return "";
   const r=(new Date(iso)-Date.now())/1000;
   if(r<=0) return "resetting…";
   const d=Math.floor(r/86400), h=Math.floor(r%86400/3600), m=Math.floor(r%3600/60), s=Math.floor(r%60);
   const parts=[];
-  if(d>0) parts.push(d+"D");
-  if(h>0||parts.length) parts.push(h+"H");
-  if(m>0||parts.length) parts.push(m+"M");
-  parts.push(s+"S");
-  return "resets in "+parts.join(" ");
+  if(d>0) parts.push(d+"d");
+  if(h>0||parts.length) parts.push(h+"h");
+  if(m>0||parts.length) parts.push(m+"m");
+  parts.push(s+"s");
+  return "resets in "+parts.slice(0,3).join(" ");
 }
 function updateCountdowns(){
   const off=snap.official||{}, week=snap.week||{};
