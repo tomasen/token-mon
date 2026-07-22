@@ -139,8 +139,8 @@
   <!-- THIS WEEK — total, limit %, and by-model breakdown, all in one card -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · This week</div><div class="reset" id="wkReset"></div></div>
-    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens · this machine</span></div>
-    <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit · whole account</small></div>
+    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens · local</span></div>
+    <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit · account-wide</small></div>
     <div class="meter"><div class="fill" id="wkFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="wkModelWrap"></div>
@@ -149,8 +149,8 @@
   <!-- LAST 5 HOURS — same shape -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · Last 5 hours</div><div class="reset" id="sessReset"></div></div>
-    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens · this machine</span></div>
-    <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit · whole account</small></div>
+    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens · local</span></div>
+    <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit · account-wide</small></div>
     <div class="meter"><div class="fill" id="sessFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="modelWrap"></div>
@@ -159,8 +159,8 @@
   <!-- CODEX (OpenAI) — same shape, shown when Codex is installed -->
   <div class="card" id="cxCard" style="display:none">
     <div class="row-between"><div class="label">Codex · <span id="cxPlan">–</span></div><div class="reset" id="cxReset"></div></div>
-    <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit">tokens · this machine</span></div>
-    <div class="hero-pct">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit · whole account</small></div>
+    <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit">tokens · local</span></div>
+    <div class="hero-pct">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit · account-wide</small></div>
     <div class="meter"><div class="fill" id="cxFill"></div></div>
     <div class="bymodel-head" id="cxByHead" style="display:none">by model</div>
     <div id="cxModelWrap"></div>
@@ -192,7 +192,7 @@
       take the official percentage Claude reports and sharpen it with your exact token counts.</p>
       <p><b>Per-model %.</b> Each model shows how much of the limit that actually constrains it you've used —
       its own weekly cap if it has one, otherwise its use of the shared window quota. Not a share of tokens.</p>
-      <p><b>This machine vs your account.</b> The <b>≈percentages are account-wide</b> — they're the official
+      <p><b>Local vs account-wide.</b> The <b>≈percentages are account-wide</b> — they're the official
       figures, so they include every device, the web app, and mobile. The <b>token counts cover only this
       machine</b> (what its local logs contain). If you also use Claude or Codex elsewhere, the percentage will
       read higher than these token counts alone would suggest — that's expected, not a bug.</p>
