@@ -723,6 +723,12 @@ class State:
 
 STATE = None
 INDEX_PATH = Path(__file__).parent / "index.html"
+ICONS = {
+    "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/favicon.png": ("favicon.png", "image/png"),
+    "/favicon.ico": ("favicon.png", "image/png"),   # modern browsers accept PNG here
+    "/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -761,8 +767,12 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(1.0)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
-        elif path == "/favicon.ico":
-            self._send(204, b"", "image/x-icon")
+        elif path in ICONS:
+            name, ctype = ICONS[path]
+            try:
+                self._send(200, (INDEX_PATH.parent / name).read_bytes(), ctype)
+            except OSError:
+                self._send(404, "not found", "text/plain")
         else:
             self._send(404, "not found", "text/plain")
 
