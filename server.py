@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -42,6 +43,11 @@ CRED_PATH = Path.home() / ".claude" / ".credentials.json"
 STATUSLINE_DUMP = Path.home() / ".claude" / "token-mon-ratelimits.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_HOME = Path.home() / ".codex"
+# Resolve the codex binary even under systemd, whose PATH lacks ~/.local/bin.
+CODEX_BIN = shutil.which("codex")
+if not CODEX_BIN:
+    _codex_candidate = Path.home() / ".local" / "bin" / "codex"
+    CODEX_BIN = str(_codex_candidate) if _codex_candidate.exists() else None
 
 # Cost-equivalent weights relative to input=1, from published pricing. The
 # providers meter subscription limits by cost, not raw tokens — cache reads are
@@ -504,15 +510,97 @@ def codex_window_name(seconds):
 
 
 class CodexUsage:
-    """Polls OpenAI's usage endpoint with the ChatGPT OAuth token Codex already
-    keeps in ~/.codex/auth.json — official percentages, reset times, and any
-    per-model additional limits. Read-only, same data `codex /status` shows."""
+    """Official Codex account usage, actively probed.
+
+    Primary source: `codex app-server` JSON-RPC (`account/rateLimits/read`) —
+    asks Codex itself, burns no tokens, returns the authoritative multi-bucket
+    view, and lets Codex refresh its own OAuth token so this keeps working even
+    if the user never runs Codex on this machine. Fallback: OpenAI's usage
+    endpoint with the token from ~/.codex/auth.json (same data `/status` shows).
+    """
 
     def __init__(self, interval, enabled):
         self.interval = interval
         self.enabled = enabled
         self.lock = threading.Lock()
         self.data = {"ok": False, "error": "not polled yet"}
+
+    def _fetch_probe(self):
+        proc = subprocess.Popen(
+            [CODEX_BIN, "app-server"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True,
+        )
+        try:
+            def send(o):
+                proc.stdin.write(json.dumps(o) + "\n")
+                proc.stdin.flush()
+
+            def read_id(rid, timeout=25):
+                end = time.time() + timeout
+                while time.time() < end:
+                    line = proc.stdout.readline()
+                    if not line:
+                        return None
+                    try:
+                        m = json.loads(line)
+                    except ValueError:
+                        continue
+                    if m.get("id") == rid:
+                        return m
+                return None
+
+            send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {"clientInfo": {"name": "token-mon", "title": "token-mon", "version": "1.0"}}})
+            if not read_id(1):
+                raise RuntimeError("app-server: no initialize response")
+            send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+            send({"jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read", "params": {}})
+            m = read_id(2)
+            if not m or "result" not in m:
+                raise RuntimeError("app-server: no rateLimits response")
+            return m["result"]
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+    @staticmethod
+    def _window_probe(w):
+        if not isinstance(w, dict) or w.get("usedPercent") is None:
+            return None
+        mins = w.get("windowDurationMins")
+        secs = mins * 60 if mins else None
+        reset = w.get("resetsAt")
+        return {
+            "name": codex_window_name(secs),
+            "seconds": secs,
+            "pct": w.get("usedPercent"),
+            "resets_at": datetime.fromtimestamp(reset, timezone.utc).isoformat() if reset else None,
+        }
+
+    def _poll_probe(self):
+        res = self._fetch_probe()
+        rl = res.get("rateLimits") or {}
+        additional = []
+        for lid, snap in (res.get("rateLimitsByLimitId") or {}).items():
+            if not isinstance(snap, dict) or lid == rl.get("limitId"):
+                continue
+            win = self._window_probe(snap.get("primary"))
+            if win:
+                additional.append({**win, "name": snap.get("limitName") or lid})
+        with self.lock:
+            self.data = {
+                "ok": True,
+                "source": "codex app-server",
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "plan": (rl.get("planType") or "?").capitalize(),
+                "primary": self._window_probe(rl.get("primary")),
+                "secondary": self._window_probe(rl.get("secondary")),
+                "additional": additional,
+            }
 
     def _fetch(self):
         auth = json.load(open(CODEX_HOME / "auth.json"))
@@ -546,6 +634,13 @@ class CodexUsage:
         }
 
     def poll(self):
+        probe_err = None
+        if CODEX_BIN:
+            try:
+                self._poll_probe()
+                return
+            except Exception as e:
+                probe_err = str(e)[:80]
         try:
             j = self._fetch()
         except FileNotFoundError:
@@ -554,11 +649,11 @@ class CodexUsage:
             return
         except urllib.error.HTTPError as e:
             with self.lock:
-                self.data = {"ok": False, "error": f"HTTP {e.code}"}
+                self.data = {"ok": False, "error": f"probe: {probe_err} / HTTP {e.code}"}
             return
         except Exception as e:
             with self.lock:
-                self.data = {"ok": False, "error": str(e)[:120]}
+                self.data = {"ok": False, "error": f"probe: {probe_err} / {str(e)[:80]}"}
             return
         rl = j.get("rate_limit") or {}
         additional = []
@@ -804,6 +899,7 @@ class State:
         return {
             "ok": bool(cu.get("ok")),
             "error": cu.get("error"),
+            "source": cu.get("source", "endpoint"),
             "plan": cu.get("plan"),
             "window": win,
             "tokens": tokens,

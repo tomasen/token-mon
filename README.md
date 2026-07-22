@@ -18,9 +18,11 @@ leaves your machine.
 - **Per‑model weekly caps** — if a model has its own separate weekly limit (e.g.
   the newest model on Max plans), it's shown as a distinct pill on that model's row.
 - **Codex (OpenAI)** — if the Codex CLI is installed and logged in, a matching
-  card appears automatically: exact local tokens from `~/.codex/sessions`,
-  official window percentage and per‑model caps from your own ChatGPT login
-  (the same data `codex /status` shows). No configuration.
+  card appears automatically: exact local tokens from `~/.codex/sessions` (and
+  archived/compressed rollouts), official window percentage and per‑model caps
+  **asked from Codex itself** (`codex app-server` JSON‑RPC `account/rateLimits/read`
+  — token‑free, keeps Codex's own login fresh), with OpenAI's usage endpoint as
+  fallback. No configuration.
 - **Burn rate** and a **per‑minute sparkline** for the last hour.
 - An **exact per‑model table** (input / output / cache read / cache write).
 
