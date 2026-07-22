@@ -37,8 +37,20 @@ BLOCK_HOURS = 5
 RETAIN_DAYS = 8
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CRED_PATH = Path.home() / ".claude" / ".credentials.json"
+# Written by statusline_hook.py — carries FRACTIONAL used_percentage from
+# Claude Code's statusline payload, finer than the integer endpoint.
+STATUSLINE_DUMP = Path.home() / ".claude" / "token-mon-ratelimits.json"
 CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CODEX_HOME = Path.home() / ".codex"
+
+# Cost-equivalent weights relative to input=1, from published pricing. The
+# providers meter subscription limits by cost, not raw tokens — cache reads are
+# ~10% of input — so estimator math must run in these units for local usage to
+# be comparable with the official percentage.
+#   Anthropic (claude.com/pricing): output 5x, cache-write 1.25x, cache-read 0.1x
+#   OpenAI Codex credit rates (learn.chatgpt.com/docs/pricing): output 6x, cached 0.1x
+CLAUDE_W = {"in": 1.0, "out": 5.0, "cw": 1.25, "cr": 0.1}
+CODEX_W = {"in": 1.0, "out": 6.0, "cw": 1.0, "cr": 0.1}
 
 # Fallback estimates of tokens per 5h block (only used if the official endpoint
 # is unavailable). Anthropic does not publish real token limits.
@@ -138,6 +150,28 @@ class OfficialUsage:
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.loads(r.read().decode())
 
+    @staticmethod
+    def _statusline_overlay(session, weekly):
+        """Claude Code's statusline payload (saved by statusline_hook.py) has
+        FRACTIONAL used_percentage — overlay it when fresh so calibration and
+        estimation run at decimal precision instead of whole percents."""
+        try:
+            d = json.load(open(STATUSLINE_DUMP))
+        except Exception:
+            return
+        if time.time() - (d.get("ts") or 0) > 600:
+            return
+        for blk, win in ((session, d.get("five_hour")), (weekly, d.get("seven_day"))):
+            if not isinstance(win, dict):
+                continue
+            v = win.get("used_percentage")
+            if isinstance(v, (int, float)):
+                blk["pct"] = float(v)
+                blk["precise"] = True
+            r = win.get("resets_at")
+            if isinstance(r, (int, float)) and r > 0:
+                blk["resets_at"] = datetime.fromtimestamp(r, timezone.utc).isoformat()
+
     def poll(self):
         try:
             j = self._fetch()
@@ -164,6 +198,7 @@ class OfficialUsage:
             "resets_at": sd.get("resets_at"),
             "severity": sev.get("weekly_all", "normal"),
         }
+        self._statusline_overlay(session, weekly)
         models = []
         for lim in j.get("limits") or []:
             if lim.get("kind") == "weekly_scoped":
@@ -335,21 +370,30 @@ class CodexScanner:
     aggregation helpers work: in=non-cached input, cr=cached input, out=output
     (+reasoning), cw=0."""
 
-    def __init__(self, root: Path):
-        self.root = root
+    def __init__(self, roots):
+        self.roots = list(roots)
         self.offsets = {}
         self.models = {}     # path -> current model for subsequent turns
         self.events = []
+        self.rate = None     # freshest rate_limits snapshot seen in a rollout
+        self.zst_done = set()  # cold .jsonl.zst files already ingested
         self.lock = threading.Lock()
         self.files_tracked = 0
 
     def scan(self):
         new_events = []
-        try:
-            paths = list(self.root.glob("**/*.jsonl"))
-        except OSError:
-            paths = []
-        self.files_tracked = len(paths)
+        paths = []
+        for root in self.roots:
+            try:
+                paths.extend(root.glob("**/*.jsonl"))
+                # Codex background-compresses cold rollouts; ingest those once.
+                for zp in root.glob("**/*.jsonl.zst"):
+                    if zp not in self.zst_done:
+                        new_events.extend(self._read_zst(zp))
+                        self.zst_done.add(zp)
+            except OSError:
+                pass
+        self.files_tracked = len(paths) + len(self.zst_done)
         for path in paths:
             try:
                 size = path.stat().st_size
@@ -388,6 +432,30 @@ class CodexScanner:
                 self.events = [e for e in self.events if e["ts"] >= cutoff]
         return len(new_events)
 
+    def _read_zst(self, path):
+        """Ingest a compressed cold rollout in one pass (they're immutable)."""
+        try:
+            import zstandard
+        except ImportError:
+            return []   # optional dependency; cold files are usually outside windows
+        events = []
+        try:
+            with open(path, "rb") as f:
+                data = zstandard.ZstdDecompressor().stream_reader(f).read()
+            for raw in data.split(b"\n"):
+                if not raw.strip():
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                ev = self._extract(path, entry)
+                if ev:
+                    events.append(ev)
+        except Exception:
+            pass
+        return events
+
     def _extract(self, path, entry):
         payload = entry.get("payload") or {}
         ptype = payload.get("type") or entry.get("type")
@@ -396,11 +464,20 @@ class CodexScanner:
             self.models[path] = model
         if ptype != "token_count":
             return None
+        ts = parse_ts(entry.get("timestamp")) or datetime.now(timezone.utc)
+        # Rollouts embed the freshest OFFICIAL rate-limit snapshot per turn,
+        # with FRACTIONAL used_percent — better than the integer endpoint.
+        rl = payload.get("rate_limits") or {}
+        prim = rl.get("primary") or {}
+        if prim.get("used_percent") is not None:
+            snap = {"ts": ts, "pct": float(prim["used_percent"]),
+                    "window_seconds": (prim.get("window_minutes") or 0) * 60}
+            if not self.rate or ts >= self.rate["ts"]:
+                self.rate = snap
         info = payload.get("info") or payload
         last = info.get("last_token_usage") or payload.get("last_token_usage")
         if not isinstance(last, dict):
             return None
-        ts = parse_ts(entry.get("timestamp")) or datetime.now(timezone.utc)
         inp = last.get("input_tokens") or 0
         cached = last.get("cached_input_tokens") or 0
         out = (last.get("output_tokens") or 0) + (last.get("reasoning_output_tokens") or 0)
@@ -411,7 +488,7 @@ class CodexScanner:
             "model": self.models.get(path) or "codex",
             "in": max(0, inp - cached),
             "out": out,
-            "cw": 0,
+            "cw": last.get("cache_write_input_tokens") or 0,
             "cr": cached,
         }
 
@@ -515,25 +592,38 @@ class CodexUsage:
 
 
 class AcctEstimator:
-    """Best-effort estimate of ACCOUNT-WIDE tokens, which no provider exposes.
+    """Best-effort estimate of ACCOUNT-WIDE usage, which no provider exposes.
 
-    Principle: local tokens are a subset of account tokens, so any observed
-    (local tokens) / (official %) ratio is a LOWER bound on the account's
-    tokens-per-percent. We record the best ratio ever seen — from cumulative
-    window readings and from deltas between consecutive official readings
-    (intervals where only this machine was active converge to the true ratio).
-    Denominators are padded for the official %'s integer rounding, so the
-    estimate stays a floor, never an overstatement. Best ratios persist to disk
-    so the estimate sharpens over days, not per-run."""
+    All math runs in WEIGHTED (cost-equivalent) units, because the providers
+    meter their limits by cost — raw local tokens are NOT comparable with the
+    official percentage (a cache-heavy hour can add raw tokens far faster than
+    it consumes the metered limit). In weighted units, local usage is a strict
+    subset of account usage, so (weighted local)/(official %) is a true lower
+    bound of the account's usage-per-percent. We ratchet the best bound seen —
+    cumulative window readings plus deltas between official readings —
+    padding denominators for the %'s integer rounding so the bound never
+    overstates. A per-key raw/weighted mix factor converts the weighted
+    estimate back to familiar raw-token magnitudes for display. Confidence is
+    earned, not assumed: an absolute number is only reported when local growth
+    explains most of the account's observed % growth.  State persists so the
+    estimate sharpens over days, not per-run."""
+
+    VERSION = 3
 
     def __init__(self, path):
         self.path = path
         self.lock = threading.Lock()
-        self.best = {}   # key -> tokens per 1% of the account limit
-        self.last = {}   # key -> (pct, tokens) anchor for delta samples
+        self.best = {}   # key -> weighted units per 1% of the account limit
+        self.mix = {}    # key -> raw/weighted ratio for display conversion
+        self.last = {}   # key -> (pct, weighted) anchor for >=2%-jump samples
+        self.step = {}   # key -> (pct, weighted) anchor advanced every sample
+        self.sums = {}   # key -> [dpct_total, dweighted_total] evidence
         try:
             d = json.load(open(path))
-            self.best = {k: float(v) for k, v in d.get("best", {}).items()}
+            if d.get("v") == self.VERSION:
+                self.best = {k: float(v) for k, v in d.get("best", {}).items()}
+                self.mix = {k: float(v) for k, v in d.get("mix", {}).items()}
+                self.sums = {k: [float(v[0]), float(v[1])] for k, v in d.get("sums", {}).items()}
         except Exception:
             pass
 
@@ -541,43 +631,71 @@ class AcctEstimator:
         try:
             tmp = str(self.path) + ".tmp"
             with open(tmp, "w") as f:
-                json.dump({"best": self.best}, f)
+                json.dump({"v": self.VERSION, "best": self.best,
+                           "mix": self.mix, "sums": self.sums}, f)
             os.replace(tmp, self.path)
         except OSError:
             pass
 
-    def sample(self, key, local_tokens, pct):
-        if pct is None or local_tokens is None:
+    def sample(self, key, raw, weighted, pct):
+        """Feed (raw local tokens, weighted local tokens, official %) for a
+        window. Callers must only invoke this when the local window is aligned
+        to the OFFICIAL window boundary — sampling against a fallback window
+        poisons the ratios."""
+        if pct is None or weighted is None:
             return
         with self.lock:
             updated = False
+            if weighted > 0 and raw:
+                self.mix[key] = raw / weighted
             if pct >= 2:
-                r = local_tokens / (pct + 0.5)          # rounding-safe floor
+                r = weighted / (pct + 0.5)              # rounding-safe floor
                 if r > self.best.get(key, 0):
                     self.best[key] = r
                     updated = True
+            sp = self.step.get(key)
+            if sp is None or pct < sp[0] or weighted < sp[1]:
+                self.step[key] = (pct, weighted)        # window reset / first sight
+            elif pct > sp[0] or weighted > sp[1]:
+                sums = self.sums.setdefault(key, [0.0, 0.0])
+                sums[0] += pct - sp[0]
+                sums[1] += weighted - sp[1]
+                self.step[key] = (pct, weighted)
+                updated = True
             lp = self.last.get(key)
-            if lp is None or pct < lp[0] or local_tokens < lp[1]:
-                self.last[key] = (pct, local_tokens)    # window reset / first sight
+            if lp is None or pct < lp[0] or weighted < lp[1]:
+                self.last[key] = (pct, weighted)
             elif pct - lp[0] >= 2:
-                r = (local_tokens - lp[1]) / (pct - lp[0] + 1.0)
+                r = (weighted - lp[1]) / (pct - lp[0] + 1.0)
                 if r > self.best.get(key, 0):
                     self.best[key] = r
-                    updated = True
-                self.last[key] = (pct, local_tokens)
+                self.last[key] = (pct, weighted)
+                updated = True
             if updated:
                 self._save()
 
-    def estimate(self, key, pct, local_tokens):
+    def estimate(self, key, pct, raw):
         r = self.best.get(key)
-        if not r or pct is None:
+        m = self.mix.get(key)
+        if not r or not m or pct is None:
             return None
-        # account usage can never be below what this machine alone produced
-        return {"tokens": max(pct * r, local_tokens or 0), "limit": 100 * r}
+        dpct, dw = self.sums.get(key, (0.0, 0.0))
+        explained = min(1.0, dw / (dpct * r)) if dpct > 0 and r > 0 else None
+        confident = dpct >= 3 and explained is not None and explained >= 0.5
+        return {
+            "tokens": max(pct * r * m, raw or 0),   # raw-equivalent, floored at local
+            "limit": 100 * r * m,
+            "confident": confident,
+            "explained": explained,
+        }
 
 
 def ev_total(e):
     return e["in"] + e["out"] + e["cw"] + e["cr"]
+
+
+def ev_weighted(e, w):
+    return e["in"] * w["in"] + e["out"] * w["out"] + e["cw"] * w["cw"] + e["cr"] * w["cr"]
 
 
 def build_blocks(events):
@@ -646,6 +764,13 @@ class State:
             events = list(self.codex_scanner.events)
             files = self.codex_scanner.files_tracked
         win = cu.get("primary") if cu.get("ok") else None
+        # Prefer a rollout-embedded snapshot when it's fresher than the endpoint
+        # poll and covers the same window — it carries fractional precision.
+        snap = self.codex_scanner.rate
+        if win and snap and win.get("seconds") and abs(snap["window_seconds"] - win["seconds"]) < 3600:
+            fetched = parse_ts(cu.get("fetched_at"))
+            if fetched is None or snap["ts"] >= fetched:
+                win = dict(win, pct=snap["pct"])
         # Aggregate exact local tokens over the official window (or 7d fallback).
         if win and win.get("resets_at") and win.get("seconds"):
             wstart = parse_ts(win["resets_at"]) - timedelta(seconds=win["seconds"])
@@ -673,7 +798,9 @@ class State:
         tokens = agg(win_events)
         cx_pct = win.get("pct") if win else None
         est_key = f"codex_{win['name']}" if win else "codex"
-        self.est.sample(est_key, tokens["total"], cx_pct)
+        if win and win.get("resets_at") and cx_pct is not None:
+            cx_weighted = sum(ev_weighted(e, CODEX_W) for e in win_events)
+            self.est.sample(est_key, tokens["total"], cx_weighted, cx_pct)
         return {
             "ok": bool(cu.get("ok")),
             "error": cu.get("error"),
@@ -746,11 +873,17 @@ class State:
         weekly_limit = official.get("weekly_limit_calibrated") if off_ok else None
         week_pct = (week_tokens["total"] / weekly_limit * 100) if weekly_limit else None
 
-        # Feed the account-wide estimator with (local tokens, OFFICIAL %) pairs.
+        # Feed the account-wide estimator with (raw, weighted, OFFICIAL %) — but
+        # ONLY when the local window aligns with the official window boundary;
+        # sampling against a fallback window poisons the ratios.
         s_off = (official.get("session") or {}).get("pct") if off_ok else None
         w_off = weekly_all.get("pct") if off_ok else None
-        self.est.sample("claude_5h", session_tokens["total"], s_off)
-        self.est.sample("claude_weekly", week_tokens["total"], w_off)
+        if win_start is not None and s_off is not None:
+            s_weighted = sum(ev_weighted(e, CLAUDE_W) for e in session_events)
+            self.est.sample("claude_5h", session_tokens["total"], s_weighted, s_off)
+        if off_ok and official.get("weekly_window_start") and w_off is not None:
+            w_weighted = sum(ev_weighted(e, CLAUDE_W) for e in week_events)
+            self.est.sample("claude_weekly", week_tokens["total"], w_weighted, w_off)
 
         burn_cut = now - timedelta(minutes=10)
         per_sec = sum(ev_total(e) for e in events if e["ts"] >= burn_cut) / 600.0
@@ -882,7 +1015,7 @@ def main():
     scanner = UsageScanner(root)
     version = detect_version()
     usage = OfficialUsage(scanner, version, args.usage_poll, not args.no_usage)
-    codex_scanner = CodexScanner(CODEX_HOME / "sessions")
+    codex_scanner = CodexScanner([CODEX_HOME / "sessions", CODEX_HOME / "archived_sessions"])
     codex_usage = CodexUsage(args.usage_poll, not args.no_usage and CODEX_HOME.exists())
     STATE = State(scanner, usage, args, plan_label, fallback_limit,
                   codex_scanner, codex_usage)

@@ -104,11 +104,22 @@ Manage it: `systemctl --user status token-mon` · `journalctl --user -u token-mo
 - **Percentages are approximate** (shown with a `≈`) — the underlying limits aren't
   published, so they're the official percentage sharpened with your exact tokens.
   Read a percentage as "about right," a token count as exact.
-- **The "account-wide: ≥ …" line is a best-effort estimate.** Neither provider
-  exposes absolute account numbers, so token-mon relates your local tokens to the
-  official percentage over time and reports a floor ("at least this many"). It
-  ratchets upward as evidence accumulates (state persists in `.state.json`) and is
-  most accurate when this machine does most of your usage.
+- **Account-wide comes first.** Limits are account-level, so each card's hero is
+  account-wide: an estimated token count when local evidence supports it, else the
+  official percentage. Estimates run in the cost-weighted units providers actually
+  meter (cache reads ≪ output), are confidence-gated (no number is shown when your
+  usage is mostly on other devices), ratchet upward as evidence accumulates
+  (state persists in `.state.json`), and are most accurate when this machine does
+  most of your usage.
+- **Optional precision boost (Claude):** install the included statusline hook and
+  token-mon reads the rate-limit data Claude Code itself pushes — fresher than the
+  endpoint and fractional when available:
+
+  ```json
+  "statusLine": {"type": "command", "command": "python3 /path/to/token-mon/statusline_hook.py"}
+  ```
+
+  (in `~/.claude/settings.json`; it also prints a useful usage line in the CLI)
 
 ## Privacy & caveats
 
