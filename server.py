@@ -58,6 +58,14 @@ if not CODEX_BIN:
 CLAUDE_W = {"in": 1.0, "out": 5.0, "cw": 1.25, "cr": 0.1}
 CODEX_W = {"in": 1.0, "out": 6.0, "cw": 1.0, "cr": 0.1}
 
+# Rough weekly-limit priors (raw tokens) for Codex, used only until local
+# measurement provides a better figure. Order-of-magnitude anchors from
+# openai/codex discussions #2251/#26512 and 2026 community pricing analyses
+# (Plus weekly ~ single-digit millions of tokens; Pro = 5-20x Plus). These are
+# deliberately conservative and clearly imprecise — measurement replaces them.
+CODEX_WEEKLY_PRIOR = {"plus": 10_000_000, "pro": 50_000_000, "business": 10_000_000,
+                      "team": 10_000_000, "enterprise": 50_000_000}
+
 # Fallback estimates of tokens per 5h block (only used if the official endpoint
 # is unavailable). Anthropic does not publish real token limits.
 PLAN_PRESETS = {"pro": 19_000, "max5": 88_000, "max20": 220_000}
@@ -848,8 +856,32 @@ class State:
         self.codex_scanner = codex_scanner
         self.codex_usage = codex_usage
         self.est = AcctEstimator(Path(__file__).parent / ".state.json")
+        self.live = {}   # window-key -> live account-token sync state
         self._cache = (0.0, None)
         self.lock = threading.Lock()
+
+    def _live_est(self, key, pct, local_raw, limit):
+        """The user-visible account-wide token counter, per the sync design:
+        anchor at official% x limit, advance live with local token deltas
+        between official readings, re-sync upward when the official % moves.
+        Never ticks backward mid-window (freezes instead if the provider
+        recomputes downward); a fresh window key starts a fresh counter."""
+        if pct is None or not limit:
+            return None
+        floor_base = pct / 100.0 * limit
+        cap = (pct + 1.5) / 100.0 * limit    # can't be past the next % boundary
+        st = self.live.get(key)
+        if st is None or (local_raw or 0) < st["local"]:
+            st = {"pct": pct, "base": floor_base, "local": local_raw or 0}
+        if pct > st["pct"]:
+            cur = st["base"] + ((local_raw or 0) - st["local"])
+            st = {"pct": pct, "base": min(max(floor_base, cur), cap),
+                  "local": local_raw or 0}
+        elif pct < st["pct"]:
+            st = dict(st, pct=pct)           # provider recomputed down: freeze
+        est = st["base"] + ((local_raw or 0) - st["local"])
+        self.live[key] = st
+        return min(est, cap)
 
     def _codex_block(self, now):
         if not self.codex_usage:
@@ -896,6 +928,16 @@ class State:
         if win and win.get("resets_at") and cx_pct is not None:
             cx_weighted = sum(ev_weighted(e, CODEX_W) for e in win_events)
             self.est.sample(est_key, tokens["total"], cx_weighted, cx_pct)
+        cx_meas = self.est.estimate(est_key, cx_pct, tokens["total"]) or {}
+        prior = CODEX_WEEKLY_PRIOR.get((cu.get("plan") or "").lower())
+        cx_lim = max(filter(None, (cx_meas.get("limit"), prior)), default=None)
+        cx_live = self._live_est(("cx", (win or {}).get("resets_at") or ""),
+                                 cx_pct, tokens["total"], cx_lim)
+        cx_est = ({"tokens": cx_live, "limit": cx_lim, "pct": cx_live / cx_lim * 100}
+                  if cx_live and cx_lim else None)
+        if cx_est and tokens["total"]:
+            k = cx_est["tokens"] / tokens["total"]
+            models = [dict(m, estTotal=m["total"] * k) if m["total"] else m for m in models]
         return {
             "ok": bool(cu.get("ok")),
             "error": cu.get("error"),
@@ -904,7 +946,7 @@ class State:
             "window": win,
             "tokens": tokens,
             "models": models,
-            "acctEst": self.est.estimate(est_key, cx_pct, tokens["total"]),
+            "est": cx_est,
             "meta": {"files": files, "events": len(events)},
         }
 
@@ -992,6 +1034,31 @@ class State:
                 if 0 <= i < 60:
                     spark[i] += ev_total(e)
 
+        # Live account-wide token counters: best available limit floor
+        # (measured ratchet vs calibration), anchored to the official %,
+        # advanced by local deltas between official readings.
+        s_meas = self.est.estimate("claude_5h", s_off, session_tokens["total"]) or {}
+        s_lim = max(filter(None, (s_meas.get("limit"), limit)), default=None)
+        s_live = self._live_est(("5h", str(session_end)), s_off,
+                                session_tokens["total"], s_lim)
+        s_est = ({"tokens": s_live, "limit": s_lim, "pct": s_live / s_lim * 100}
+                 if s_live and s_lim else None)
+        w_meas = self.est.estimate("claude_weekly", w_off, week_tokens["total"]) or {}
+        w_lim = max(filter(None, (w_meas.get("limit"), weekly_limit)), default=None)
+        w_live = self._live_est(("wk", weekly_all.get("resets_at") or ""), w_off,
+                                week_tokens["total"], w_lim)
+        w_est = ({"tokens": w_live, "limit": w_lim, "pct": w_live / w_lim * 100}
+                 if w_live and w_lim else None)
+
+        def scale_models(models, est_blk, local_total):
+            if not est_blk or not local_total:
+                return models
+            k = est_blk["tokens"] / local_total
+            return [dict(m, estTotal=m["total"] * k) for m in models]
+
+        session_models = scale_models(session_models, s_est, session_tokens["total"])
+        week_models = scale_models(week_models, w_est, week_tokens["total"])
+
         return {
             "now": now.isoformat(),
             "plan": {"label": self.plan_label},
@@ -1005,7 +1072,8 @@ class State:
                 "limitLabel": limit_label,
                 "limitSource": limit_source,
                 "pct": (session_tokens["total"] / limit * 100) if limit else None,
-                "acctEst": self.est.estimate("claude_5h", s_off, session_tokens["total"]),
+                "est": s_est,
+                "officialPct": s_off,
             },
             "week": {
                 "start": wstart.isoformat(),
@@ -1018,7 +1086,7 @@ class State:
                 "severity": weekly_all.get("severity", "normal"),
                 "scoped": official.get("weekly_models", []) if off_ok else [],
                 "source": "calibrated" if weekly_limit else "estimate",
-                "acctEst": self.est.estimate("claude_weekly", w_off, week_tokens["total"]),
+                "est": w_est,
             },
             "burn": {"perSec": per_sec, "perMin": per_sec * 60},
             "spark": spark,

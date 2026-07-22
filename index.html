@@ -70,6 +70,7 @@
      same visual language as the by-model card. */
   .hero-num { display:flex; align-items:flex-end; font-weight:600; margin:8px 0 2px; font-size:clamp(30px,9.5vw,50px); max-width:100%; }
   .hero-num .od { font-size:inherit; color:var(--ink); }
+  .hero-num .approx { font-size:.42em; color:var(--muted); align-self:flex-start; margin:.18em 2px 0 0; }
   .unit { font-size:.30em; font-weight:600; color:var(--muted); margin-left:.4em; margin-bottom:.26em; letter-spacing:.02em; white-space:nowrap; }
   .hero-pct { font-size:14px; color:var(--ink-2); font-variant-numeric:tabular-nums; margin:3px 0 14px; }
   .hero-pct small { color:var(--muted); font-weight:400; }
@@ -138,39 +139,33 @@
     <span class="meta" id="meta"></span>
   </header>
 
-  <!-- THIS WEEK — account-wide usage is the hero; local is supporting evidence -->
+  <!-- THIS WEEK — everything shown is account-wide (estimated) -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · This week</div><div class="reset" id="wkReset"></div></div>
-    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit" id="wkUnit">tokens · account-wide</span></div>
+    <div class="hero-num"><span class="approx">≈</span><span class="od" id="wkTok"></span><span class="unit">tokens used</span></div>
     <div class="hero-pct" id="wkPctLine">≈<span id="wkPctV">–</span>%<small> of your weekly limit</small></div>
-    <div class="hero-pct" id="wkAlt" style="display:none"><small></small></div>
-    <div class="hero-est" id="wkLocal"></div>
     <div class="meter"><div class="fill" id="wkFill"></div></div>
-    <div class="bymodel-head">by model · local tokens</div>
+    <div class="bymodel-head">by model</div>
     <div id="wkModelWrap"></div>
   </div>
 
   <!-- LAST 5 HOURS — same shape -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · Last 5 hours</div><div class="reset" id="sessReset"></div></div>
-    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit" id="sessUnit">tokens · account-wide</span></div>
+    <div class="hero-num"><span class="approx">≈</span><span class="od" id="sessTok"></span><span class="unit">tokens used</span></div>
     <div class="hero-pct" id="sessPctLine">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit</small></div>
-    <div class="hero-pct" id="sessAlt" style="display:none"><small></small></div>
-    <div class="hero-est" id="sessLocal"></div>
     <div class="meter"><div class="fill" id="sessFill"></div></div>
-    <div class="bymodel-head">by model · local tokens</div>
+    <div class="bymodel-head">by model</div>
     <div id="modelWrap"></div>
   </div>
 
   <!-- CODEX (OpenAI) — same shape, shown when Codex is installed -->
   <div class="card" id="cxCard" style="display:none">
     <div class="row-between"><div class="label">Codex · <span id="cxPlan">–</span></div><div class="reset" id="cxReset"></div></div>
-    <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit" id="cxUnit">tokens · account-wide</span></div>
+    <div class="hero-num"><span class="approx">≈</span><span class="od" id="cxTok"></span><span class="unit">tokens used</span></div>
     <div class="hero-pct" id="cxPctLine">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit</small></div>
-    <div class="hero-pct" id="cxAlt" style="display:none"><small></small></div>
-    <div class="hero-est" id="cxLocal"></div>
     <div class="meter"><div class="fill" id="cxFill"></div></div>
-    <div class="bymodel-head" id="cxByHead" style="display:none">by model · local tokens</div>
+    <div class="bymodel-head" id="cxByHead" style="display:none">by model</div>
     <div id="cxModelWrap"></div>
   </div>
 
@@ -182,7 +177,7 @@
   <div class="card">
     <div class="label">Exact token counts</div>
     <details class="tbl" open>
-      <summary>last 5 hours, by model</summary>
+      <summary>last 5 hours, by model — this machine's logs (exact)</summary>
       <div class="tblscroll">
         <table id="mtable"><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th>Total</th></tr></thead><tbody></tbody></table>
       </div>
@@ -200,15 +195,15 @@
       take the official percentage Claude reports and sharpen it with your exact token counts.</p>
       <p><b>Per-model %.</b> Each model shows how much of the limit that actually constrains it you've used —
       its own weekly cap if it has one, otherwise its use of the shared window quota. Not a share of tokens.</p>
-      <p><b>The big number is account-wide.</b> Limits apply to your whole account, so each card leads with
-      account-wide usage: an <b>estimated token count</b> when this machine's activity explains enough of the
-      account's growth to be accurate, otherwise the <b>official percentage</b> — a coarse-but-true number
-      always beats a precise-but-wrong one. Local tokens (this machine's logs) appear as a footnote; they're
-      the evidence behind the estimates.</p>
-      <p><b>How the estimate works.</b> Neither provider publishes absolute account numbers. token-mon relates
-      local usage to the official percentage over time — in the cost-weighted units providers actually meter
-      (cache reads count far less than output) — and only reports tokens once that evidence is consistent.
-      Estimates sharpen the longer token-mon runs, and read low if much of your usage happens elsewhere.</p>
+      <p><b>Every number is account-wide.</b> Limits apply to your whole account, so that's what every card
+      shows — token counts and percentages alike, all marked ≈ because they're estimates. Nothing on the cards
+      is a per-machine number.</p>
+      <p><b>How the live counter works.</b> The official percentage (from your own Claude/Codex login) anchors
+      the counter: tokens ≈ percentage × estimated limit. Between official readings, activity on this machine
+      advances it live; each new official reading re-syncs it. The limit itself is estimated by relating usage
+      to the official percentage over time — in the cost-weighted units providers actually meter — so it
+      sharpens the longer token-mon runs. If most of your usage happens on other devices, the token figures
+      lean on the estimated limit and are rougher; the percentages stay anchored to official data regardless.</p>
       <p><b>Codex.</b> If OpenAI's Codex CLI is installed, its usage appears the same way — exact tokens from
       <code>~/.codex/sessions</code>, official percentages from your own ChatGPT login.</p>
       <p><b>Private.</b> Everything is computed locally from <code>~/.claude</code> and <code>~/.codex</code>;
@@ -288,7 +283,8 @@ const stWk = {ods:{}, key:""};   // by-model odometers, this week
 const stCx = {ods:{}, key:""};   // by-model odometers, Codex
 const cxTok = new Odometer(el("cxTok"));
 let snap=null, lastFrame=0, lastSessionStart=null, lastWeekStart=null;
-let wkTokVal=0, sessTokVal=0;   // eased numerics, drive the smooth ticking %
+let wkTokVal=0, sessTokVal=0;   // eased account-estimate values, drive the ticking %
+let cxEstState=null;
 
 function sevClass(sev, pct){
   if(sev==="critical"||pct>=90) return "crit";
@@ -309,29 +305,28 @@ function onSnapshot(s){
   el("meta").textContent=`${s.meta.files} transcripts · ${fmt(s.meta.events)} msgs`;
 
   if(week.start!==lastWeekStart){
-    lastWeekStart=week.start; wkTok.snap(); wkTokVal=week.tokens.total;
+    lastWeekStart=week.start; wkTok.snap(); wkTokVal=(week.est||{}).tokens||0;
     for(const k in stWk.ods) stWk.ods[k].od.snap();
   }
   if(sess.start!==lastSessionStart){
-    lastSessionStart=sess.start; sessTok.snap(); sessTokVal=sess.tokens.total;
+    lastSessionStart=sess.start; sessTok.snap(); sessTokVal=(sess.est||{}).tokens||0;
     for(const k in st5h.ods) st5h.ods[k].od.snap();
   }
 
-  // THIS WEEK — account-wide is the hero (estimated tokens when local evidence
-  // supports it, otherwise the official %); local tokens demoted to a footnote.
-  applyHero("wk", wkTok, week.acctEst, week.tokens.total, week.officialPct,
-            "% of your weekly limit · account-wide");
-  const wpct = week.pct==null ? 0 : week.pct;
+  // THIS WEEK — the hero is the live account-wide token estimate
+  // (official % anchor, advanced by local activity between readings).
+  const wEst = week.est;
+  wkTok.set(wEst ? fmt(wEst.tokens) : "–");
+  const wpct = wEst ? wEst.pct : (week.officialPct||0);
   const wf=el("wkFill"); wf.className="fill "+sevClass(week.severity, wpct); wf.style.width=Math.min(100,wpct)+"%";
-  renderModelTickers("wkModelWrap", week.models||[], stWk, {limit:week.limit, total:week.tokens.total, scoped:week.scoped||[], noun:"weekly"});
+  renderModelTickers("wkModelWrap", week.models||[], stWk, {limit:wEst&&wEst.limit, total:week.tokens.total, scoped:week.scoped||[], noun:"weekly"});
 
   // LAST 5 HOURS — same shape
-  applyHero("sess", sessTok, sess.acctEst, sess.tokens.total,
-            (off.ok&&off.session)?off.session.pct:null,
-            "% of your 5-hour limit · account-wide");
-  const spct = sess.pct==null ? 0 : sess.pct;
+  const sEst = sess.est;
+  sessTok.set(sEst ? fmt(sEst.tokens) : "–");
+  const spct = sEst ? sEst.pct : (sess.officialPct||0);
   const sf=el("sessFill"); sf.className="fill "+sevClass(off.session&&off.session.severity, spct); sf.style.width=Math.min(100,spct)+"%";
-  renderModelTickers("modelWrap", sess.models||[], st5h, {limit:sess.limit, total:sess.tokens.total, scoped:[], noun:"5-hour"});
+  renderModelTickers("modelWrap", sess.models||[], st5h, {limit:sEst&&sEst.limit, total:sess.tokens.total, scoped:[], noun:"5-hour"});
 
   renderCodex(s.codex);
 
@@ -364,7 +359,8 @@ function renderModelTickers(wrapId, models, st, opts){
   }
   for(const m of models){
     const o=st.ods[m.id]; if(!o) continue;
-    o.od.set(fmt(m.total));
+    const v = m.estTotal!=null ? m.estTotal : m.total;   // account-scaled estimate
+    o.od.set(fmt(v));
     // Percentage = usage against the limit that actually constrains this model
     // (what you're ABLE to use): a model with its own scoped cap → that official
     // cap; otherwise its consumption of the shared window quota.
@@ -373,32 +369,11 @@ function renderModelTickers(wrapId, models, st, opts){
       String(m.model).toLowerCase().includes(String(x.model).toLowerCase())));
     let pct, label;
     if(sc && sc.pct!=null){ pct=sc.pct; label=`of your ${esc(sc.model)} weekly cap`; }
-    else if(limit){ pct=m.total/limit*100; label=`of your ${noun} limit`; }
-    else { pct = total>0 ? m.total/total*100 : 0; label=`of ${noun} tokens`; }  // estimate fallback
+    else if(limit){ pct=v/limit*100; label=`of your ${noun} limit`; }
+    else { pct = total>0 ? m.total/total*100 : 0; label=`of ${noun} tokens`; }
     o.pct.innerHTML = `≈${pct.toFixed(1)}%<small>${label}</small>`;
     o.bar.style.width = Math.min(100, Math.max(1, pct))+"%";
   }
-}
-
-// The hero shows the account-wide figure. Estimated absolute tokens appear ONLY
-// when the estimator is confident (local growth explains the account's % growth);
-// otherwise the official percentage itself is the hero — a coarse-but-true
-// number always beats a precise-but-wrong one.
-function applyHero(p, od, est, localTok, officialPct, pctUnit){
-  if(est && est.confident){
-    od.set(fmt(Math.max(est.tokens, localTok||0)));
-    el(p+"Unit").textContent = "tokens · account-wide · estimated";
-    el(p+"PctLine").style.display = "";
-    el(p+"Alt").style.display = "none";
-  } else {
-    od.set(officialPct==null ? "–" : String(Math.round(officialPct)));
-    el(p+"Unit").textContent = pctUnit;
-    el(p+"PctLine").style.display = "none";
-    const alt=el(p+"Alt");
-    alt.style.display = "";
-    alt.innerHTML = "<small>account-wide token estimate needs more local evidence — official % shown</small>";
-  }
-  el(p+"Local").textContent = (localTok||0) > 0 ? `local: ${fmt(localTok)} tokens` : "";
 }
 
 function renderCodex(cx){
@@ -409,10 +384,11 @@ function renderCodex(cx){
   const w=cx.window||{};
   el("cxWin").textContent=w.name||"usage";
   el("cxReset").dataset.reset=w.resets_at||"";
-  const pct=w.pct==null?0:w.pct;
-  el("cxPctV").textContent=Number(pct).toFixed(1);
-  applyHero("cx", cxTok, cx.acctEst, cx.tokens.total, pct,
-            `% of your ${w.name||"weekly"} limit · account-wide`);
+  const est=cx.est;
+  cxTok.set(est ? fmt(est.tokens) : "–");
+  cxEstState = est;
+  const pct = est ? est.pct : (w.pct==null?0:w.pct);
+  el("cxPctV").textContent=Number(pct).toFixed(4);
   const f=el("cxFill"); f.className="fill "+sevClass(null,pct); f.style.width=Math.min(100,pct)+"%";
   const models=cx.models||[];
   el("cxByHead").style.display = models.length ? "" : "none";
@@ -436,7 +412,7 @@ function renderCodex(cx){
   }
   for(const m of models){
     const o=stCx.ods[m.id]; if(!o) continue;
-    o.od.set(fmt(m.total));
+    o.od.set(fmt(m.estTotal!=null ? m.estTotal : m.total));
     if(m.pct!=null){
       o.pct.style.display="";
       o.pct.innerHTML=`≈${Number(m.pct).toFixed(1)}%<small>${esc(m.pctLabel||"of its cap")}</small>`;
@@ -462,10 +438,11 @@ function frame(t){
   const ease=Math.min(1, dt*3);   // slower than default so the roll is visible, but still settles to read
   if(snap){
     const wk=snap.week, ss=snap.session;
-    wkTokVal += (wk.tokens.total-wkTokVal)*ease; if(Math.abs(wk.tokens.total-wkTokVal)<1) wkTokVal=wk.tokens.total;
-    sessTokVal += (ss.tokens.total-sessTokVal)*ease; if(Math.abs(ss.tokens.total-sessTokVal)<1) sessTokVal=ss.tokens.total;
-    el("wkPctV").textContent   = wk.limit ? (wkTokVal/wk.limit*100).toFixed(4) : "–";
-    el("sessPctV").textContent = ss.limit ? (sessTokVal/ss.limit*100).toFixed(4) : "–";
+    const wt=(wk.est||{}).tokens||0, st5=(ss.est||{}).tokens||0;
+    wkTokVal += (wt-wkTokVal)*ease; if(Math.abs(wt-wkTokVal)<1) wkTokVal=wt;
+    sessTokVal += (st5-sessTokVal)*ease; if(Math.abs(st5-sessTokVal)<1) sessTokVal=st5;
+    el("wkPctV").textContent   = (wk.est&&wk.est.limit) ? (wkTokVal/wk.est.limit*100).toFixed(4) : "–";
+    el("sessPctV").textContent = (ss.est&&ss.est.limit) ? (sessTokVal/ss.est.limit*100).toFixed(4) : "–";
     updateCountdowns();
   }
   wkTok.tick(ease); sessTok.tick(ease); cxTok.tick(ease);

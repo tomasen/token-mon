@@ -106,13 +106,14 @@ Manage it: `systemctl --user status token-mon` · `journalctl --user -u token-mo
 - **Percentages are approximate** (shown with a `≈`) — the underlying limits aren't
   published, so they're the official percentage sharpened with your exact tokens.
   Read a percentage as "about right," a token count as exact.
-- **Account-wide comes first.** Limits are account-level, so each card's hero is
-  account-wide: an estimated token count when local evidence supports it, else the
-  official percentage. Estimates run in the cost-weighted units providers actually
-  meter (cache reads ≪ output), are confidence-gated (no number is shown when your
-  usage is mostly on other devices), ratchet upward as evidence accumulates
-  (state persists in `.state.json`), and are most accurate when this machine does
-  most of your usage.
+- **Everything shown is account-wide.** Limits are account-level, so every card
+  shows account-wide figures: a live estimated token counter (official % × an
+  estimated limit, advanced in real time by local activity and re-synced on each
+  official reading) and the matching percentage. Limit estimates run in the
+  cost-weighted units providers actually meter (cache reads ≪ output), ratchet
+  upward as evidence accumulates (state persists in `.state.json`), and are most
+  accurate when this machine does most of your usage; per-model numbers are the
+  account estimate split by your local model mix.
 - **Optional precision boost (Claude):** install the included statusline hook and
   token-mon reads the rate-limit data Claude Code itself pushes — fresher than the
   endpoint and fractional when available:
