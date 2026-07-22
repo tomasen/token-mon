@@ -135,7 +135,7 @@
 
   <!-- THIS WEEK — total, limit %, and by-model breakdown, all in one card -->
   <div class="card">
-    <div class="row-between"><div class="label">This week</div><div class="reset" id="wkReset"></div></div>
+    <div class="row-between"><div class="label">Claude · This week</div><div class="reset" id="wkReset"></div></div>
     <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens used</span></div>
     <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit</small></div>
     <div class="meter"><div class="fill" id="wkFill"></div></div>
@@ -145,7 +145,7 @@
 
   <!-- LAST 5 HOURS — same shape -->
   <div class="card">
-    <div class="row-between"><div class="label">Last 5 hours</div><div class="reset" id="sessReset"></div></div>
+    <div class="row-between"><div class="label">Claude · Last 5 hours</div><div class="reset" id="sessReset"></div></div>
     <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens used</span></div>
     <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit</small></div>
     <div class="meter"><div class="fill" id="sessFill"></div></div>
@@ -189,6 +189,10 @@
       take the official percentage Claude reports and sharpen it with your exact token counts.</p>
       <p><b>Per-model %.</b> Each model shows how much of the limit that actually constrains it you've used —
       its own weekly cap if it has one, otherwise its use of the shared window quota. Not a share of tokens.</p>
+      <p><b>This machine vs your account.</b> The <b>≈percentages are account-wide</b> — they're the official
+      figures, so they include every device, the web app, and mobile. The <b>token counts cover only this
+      machine</b> (what its local logs contain). If you also use Claude or Codex elsewhere, the percentage will
+      read higher than these token counts alone would suggest — that's expected, not a bug.</p>
       <p><b>Codex.</b> If OpenAI's Codex CLI is installed, its usage appears the same way — exact tokens from
       <code>~/.codex/sessions</code>, official percentages from your own ChatGPT login.</p>
       <p><b>Private.</b> Everything is computed locally from <code>~/.claude</code> and <code>~/.codex</code>;
@@ -392,12 +396,13 @@ function renderCodex(cx){
     const o=stCx.ods[m.id]; if(!o) continue;
     o.od.set(fmt(m.total));
     if(m.pct!=null){
+      o.pct.style.display="";
       o.pct.innerHTML=`≈${Number(m.pct).toFixed(1)}%<small>${esc(m.pctLabel||"of its cap")}</small>`;
       o.bar.parentElement.style.display="";
       o.bar.style.width=Math.min(100,Math.max(1,m.pct))+"%";
     } else {
-      o.pct.innerHTML=`<small>no separate cap — counts toward the ${esc(w.name||"main")} limit</small>`;
-      o.bar.parentElement.style.display="none";   // no limit of its own → no meter to fill
+      o.pct.style.display="none";                 // no separate cap → just the number
+      o.bar.parentElement.style.display="none";
     }
   }
 }

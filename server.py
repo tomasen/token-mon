@@ -595,13 +595,16 @@ class State:
                 or a["name"].lower().replace(" ", "-") in m["id"].lower())), None)
             m["pct"] = sc["pct"] if sc else None
             m["pctLabel"] = f"of your {sc['name']} cap" if sc else None
-        # Scoped limits with no local tokens yet still deserve a row.
+        # Scoped limits with no local tokens still deserve a row — but only if
+        # some of that cap is actually used (usage may come from other devices).
         for a in additional:
             if not any(m.get("pctLabel") and a["name"] in m["pctLabel"] for m in models):
                 models.append({"id": "cap:" + a["name"], "model": a["name"],
                                "in": 0, "out": 0, "cw": 0, "cr": 0, "total": 0,
                                "pct": a["pct"], "pctLabel": "of its own cap",
                                "resets_at": a.get("resets_at")})
+        # Zero rows say nothing: drop models with no usage and no cap consumption.
+        models = [m for m in models if m["total"] > 0 or (m.get("pct") or 0) > 0]
         return {
             "ok": bool(cu.get("ok")),
             "error": cu.get("error"),
