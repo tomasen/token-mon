@@ -55,6 +55,16 @@ Open **http://127.0.0.1:8420**. That's it — it detects your plan, reads your
 official usage, and starts ticking. `Ctrl‑C` stops it. Force a theme with
 `?theme=dark` / `?theme=light`.
 
+### Or just ask your AI to install it
+
+Using Claude Code, Codex CLI, or any AI coding agent? Paste this prompt and
+you're done:
+
+> Install claude-mon from https://github.com/tomasen/claude-mon — clone the
+> repo, start its server, and confirm the dashboard loads at
+> http://127.0.0.1:8420. Then set it up to start automatically on boot
+> (systemd, launchd, or whatever this machine uses) so it runs permanently.
+
 ## Run on boot (persistence)
 
 A bare `python3 server.py` stops on reboot and nothing restarts it. To keep it
