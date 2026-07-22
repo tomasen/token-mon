@@ -35,6 +35,8 @@ BLOCK_HOURS = 5
 RETAIN_DAYS = 8
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CRED_PATH = Path.home() / ".claude" / ".credentials.json"
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+CODEX_HOME = Path.home() / ".codex"
 
 # Fallback estimates of tokens per 5h block (only used if the official endpoint
 # is unavailable). Anthropic does not publish real token limits.
@@ -47,16 +49,27 @@ TIER_TO_PLAN = {
 DEFAULT_LIMIT = 88_000
 
 def label_model(mid):
-    """Generic, whitelist-free label derived straight from whatever model id
-    Claude Code wrote — so new/renamed models are followed automatically.
-    "claude-opus-4-8" -> "Opus 4.8", "claude-haiku-4-5-20251001" -> "Haiku 4.5"."""
+    """Generic, whitelist-free label derived straight from whatever model id the
+    tool wrote — so new/renamed models are followed automatically.
+    "claude-opus-4-8" -> "Opus 4.8", "gpt-5.6-sol" -> "GPT 5.6 Sol"."""
     if not mid:
         return "unknown"
     s = re.sub(r"^claude-", "", mid)
     s = re.sub(r"-\d{8}$", "", s)          # strip a trailing YYYYMMDD build id
     parts = s.split("-")
-    if len(parts) >= 2 and any(p.isdigit() for p in parts[1:]):
-        return f"{parts[0].capitalize()} {'.'.join(parts[1:])}"
+    if len(parts) >= 2:
+        head = parts[0].upper() if len(parts[0]) <= 3 else parts[0].capitalize()
+        nums, tail = [], []
+        for p in parts[1:]:
+            if p.replace(".", "").isdigit() and not tail:
+                nums.append(p)
+            else:
+                tail.append(p.capitalize())
+        if nums:
+            out = head + " " + ".".join(nums)
+            if tail:
+                out += " " + " ".join(tail)
+            return out
     return s.capitalize()
 
 
@@ -314,6 +327,191 @@ class UsageScanner:
         }
 
 
+class CodexScanner:
+    """Tails Codex CLI session rollouts (~/.codex/sessions/**/*.jsonl) for exact
+    per-turn token usage. Events reuse the Claude field names so the same
+    aggregation helpers work: in=non-cached input, cr=cached input, out=output
+    (+reasoning), cw=0."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.offsets = {}
+        self.models = {}     # path -> current model for subsequent turns
+        self.events = []
+        self.lock = threading.Lock()
+        self.files_tracked = 0
+
+    def scan(self):
+        new_events = []
+        try:
+            paths = list(self.root.glob("**/*.jsonl"))
+        except OSError:
+            paths = []
+        self.files_tracked = len(paths)
+        for path in paths:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            offset = self.offsets.get(path, 0)
+            if size == offset:
+                continue
+            if size < offset:
+                offset = 0
+            try:
+                with open(path, "rb") as f:
+                    f.seek(offset)
+                    chunk = f.read()
+            except OSError:
+                continue
+            last_nl = chunk.rfind(b"\n")
+            if last_nl == -1:
+                continue
+            self.offsets[path] = offset + last_nl + 1
+            for raw in chunk[: last_nl + 1].split(b"\n"):
+                if not raw.strip():
+                    continue
+                try:
+                    entry = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                ev = self._extract(path, entry)
+                if ev:
+                    new_events.append(ev)
+        if new_events:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=RETAIN_DAYS)
+            with self.lock:
+                self.events.extend(new_events)
+                self.events.sort(key=lambda e: e["ts"])
+                self.events = [e for e in self.events if e["ts"] >= cutoff]
+        return len(new_events)
+
+    def _extract(self, path, entry):
+        payload = entry.get("payload") or {}
+        ptype = payload.get("type") or entry.get("type")
+        model = payload.get("model") or (payload.get("info") or {}).get("model")
+        if model:
+            self.models[path] = model
+        if ptype != "token_count":
+            return None
+        info = payload.get("info") or payload
+        last = info.get("last_token_usage") or payload.get("last_token_usage")
+        if not isinstance(last, dict):
+            return None
+        ts = parse_ts(entry.get("timestamp")) or datetime.now(timezone.utc)
+        inp = last.get("input_tokens") or 0
+        cached = last.get("cached_input_tokens") or 0
+        out = (last.get("output_tokens") or 0) + (last.get("reasoning_output_tokens") or 0)
+        if inp + out == 0:
+            return None
+        return {
+            "ts": ts,
+            "model": self.models.get(path) or "codex",
+            "in": max(0, inp - cached),
+            "out": out,
+            "cw": 0,
+            "cr": cached,
+        }
+
+
+def codex_window_name(seconds):
+    if not seconds:
+        return "usage"
+    if seconds >= 6 * 86400:
+        return "weekly"
+    if seconds >= 86400:
+        return f"{seconds // 86400}-day"
+    return f"{seconds // 3600}-hour"
+
+
+class CodexUsage:
+    """Polls OpenAI's usage endpoint with the ChatGPT OAuth token Codex already
+    keeps in ~/.codex/auth.json — official percentages, reset times, and any
+    per-model additional limits. Read-only, same data `codex /status` shows."""
+
+    def __init__(self, interval, enabled):
+        self.interval = interval
+        self.enabled = enabled
+        self.lock = threading.Lock()
+        self.data = {"ok": False, "error": "not polled yet"}
+
+    def _fetch(self):
+        auth = json.load(open(CODEX_HOME / "auth.json"))
+        tokens = auth.get("tokens") or {}
+        tok, acct = tokens.get("access_token"), tokens.get("account_id")
+        if not tok:
+            raise RuntimeError("no Codex OAuth token")
+        req = urllib.request.Request(
+            CODEX_USAGE_URL,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "chatgpt-account-id": acct or "",
+                "User-Agent": "codex-cli",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode())
+
+    @staticmethod
+    def _window(w):
+        if not isinstance(w, dict):
+            return None
+        secs = w.get("limit_window_seconds")
+        reset = w.get("reset_at")
+        return {
+            "name": codex_window_name(secs),
+            "seconds": secs,
+            "pct": w.get("used_percent"),
+            "resets_at": datetime.fromtimestamp(reset, timezone.utc).isoformat() if reset else None,
+        }
+
+    def poll(self):
+        try:
+            j = self._fetch()
+        except FileNotFoundError:
+            with self.lock:
+                self.data = {"ok": False, "error": "codex not installed"}
+            return
+        except urllib.error.HTTPError as e:
+            with self.lock:
+                self.data = {"ok": False, "error": f"HTTP {e.code}"}
+            return
+        except Exception as e:
+            with self.lock:
+                self.data = {"ok": False, "error": str(e)[:120]}
+            return
+        rl = j.get("rate_limit") or {}
+        additional = []
+        for a in j.get("additional_rate_limits") or []:
+            win = self._window((a.get("rate_limit") or {}).get("primary_window"))
+            if win:
+                additional.append({**win, "name": a.get("limit_name") or "limit"})
+        with self.lock:
+            self.data = {
+                "ok": True,
+                "plan": (j.get("plan_type") or "?").capitalize(),
+                "primary": self._window(rl.get("primary_window")),
+                "secondary": self._window(rl.get("secondary_window")),
+                "additional": additional,
+            }
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.data)
+
+    def run(self):
+        if not self.enabled:
+            with self.lock:
+                self.data = {"ok": False, "error": "disabled"}
+            return
+        backoff = self.interval
+        while True:
+            self.poll()
+            backoff = self.interval if self.data.get("ok") else min(backoff * 2, 900)
+            time.sleep(backoff)
+
+
 def ev_total(e):
     return e["in"] + e["out"] + e["cw"] + e["cr"]
 
@@ -363,14 +561,56 @@ def agg_by_model(evs):
 
 
 class State:
-    def __init__(self, scanner, usage, args, plan_label, fallback_limit):
+    def __init__(self, scanner, usage, args, plan_label, fallback_limit,
+                 codex_scanner=None, codex_usage=None):
         self.scanner = scanner
         self.usage = usage
         self.args = args
         self.plan_label = plan_label
         self.fallback_limit = fallback_limit
+        self.codex_scanner = codex_scanner
+        self.codex_usage = codex_usage
         self._cache = (0.0, None)
         self.lock = threading.Lock()
+
+    def _codex_block(self, now):
+        if not self.codex_usage:
+            return None
+        cu = self.codex_usage.snapshot()
+        with self.codex_scanner.lock:
+            events = list(self.codex_scanner.events)
+            files = self.codex_scanner.files_tracked
+        win = cu.get("primary") if cu.get("ok") else None
+        # Aggregate exact local tokens over the official window (or 7d fallback).
+        if win and win.get("resets_at") and win.get("seconds"):
+            wstart = parse_ts(win["resets_at"]) - timedelta(seconds=win["seconds"])
+        else:
+            wstart = now - timedelta(days=7)
+        win_events = [e for e in events if e["ts"] >= wstart]
+        models = agg_by_model(win_events)
+        additional = cu.get("additional") or []
+        for m in models:
+            sc = next((a for a in additional if a.get("name") and (
+                a["name"].lower() in m["id"].lower() or m["id"].lower() in a["name"].lower()
+                or a["name"].lower().replace(" ", "-") in m["id"].lower())), None)
+            m["pct"] = sc["pct"] if sc else None
+            m["pctLabel"] = f"of your {sc['name']} cap" if sc else None
+        # Scoped limits with no local tokens yet still deserve a row.
+        for a in additional:
+            if not any(m.get("pctLabel") and a["name"] in m["pctLabel"] for m in models):
+                models.append({"id": "cap:" + a["name"], "model": a["name"],
+                               "in": 0, "out": 0, "cw": 0, "cr": 0, "total": 0,
+                               "pct": a["pct"], "pctLabel": "of its own cap",
+                               "resets_at": a.get("resets_at")})
+        return {
+            "ok": bool(cu.get("ok")),
+            "error": cu.get("error"),
+            "plan": cu.get("plan"),
+            "window": win,
+            "tokens": agg(win_events),
+            "models": models,
+            "meta": {"files": files, "events": len(events)},
+        }
 
     def snapshot(self):
         with self.lock:
@@ -472,6 +712,7 @@ class State:
             },
             "burn": {"perSec": per_sec, "perMin": per_sec * 60},
             "spark": spark,
+            "codex": self._codex_block(now),
             "meta": {"files": files_tracked, "events": len(events)},
         }
 
@@ -550,7 +791,10 @@ def main():
     scanner = UsageScanner(root)
     version = detect_version()
     usage = OfficialUsage(scanner, version, args.usage_poll, not args.no_usage)
-    STATE = State(scanner, usage, args, plan_label, fallback_limit)
+    codex_scanner = CodexScanner(CODEX_HOME / "sessions")
+    codex_usage = CodexUsage(args.usage_poll, not args.no_usage and CODEX_HOME.exists())
+    STATE = State(scanner, usage, args, plan_label, fallback_limit,
+                  codex_scanner, codex_usage)
 
     print(f"claude-mon: plan={plan_label} · claude-code/{version} · scanning {root}")
     scanner.scan()
@@ -566,12 +810,15 @@ def main():
             print(f"claude-mon: official usage unavailable ({d.get('error')}); using estimate")
 
     threading.Thread(target=usage.run, daemon=True).start()
+    threading.Thread(target=codex_usage.run, daemon=True).start()
+    codex_scanner.scan()
 
     def scan_loop():
         while True:
             time.sleep(1.0)
             try:
                 scanner.scan()
+                codex_scanner.scan()
             except Exception as e:
                 print(f"scan error: {e}")
 

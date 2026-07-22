@@ -1,8 +1,9 @@
 # claude-mon
 
-**A live, local dashboard for your Claude Code / Claude subscription usage.** Exact
-token counts and your official limit percentages, ticking in real time — no API
-keys, no third‑party services, nothing leaves your machine.
+**A live, local dashboard for your Claude Code / Claude subscription usage — and
+your OpenAI Codex CLI usage too.** Exact token counts and your official limit
+percentages, ticking in real time — no API keys, no third‑party services, nothing
+leaves your machine.
 
 <p align="center">
   <img src="docs/screenshot-dark.png" alt="claude-mon dashboard" width="420">
@@ -16,6 +17,10 @@ keys, no third‑party services, nothing leaves your machine.
   **per‑model breakdown** (most‑used model featured, the rest in descending order).
 - **Per‑model weekly caps** — if a model has its own separate weekly limit (e.g.
   the newest model on Max plans), it's shown as a distinct pill on that model's row.
+- **Codex (OpenAI)** — if the Codex CLI is installed and logged in, a matching
+  card appears automatically: exact local tokens from `~/.codex/sessions`,
+  official window percentage and per‑model caps from your own ChatGPT login
+  (the same data `codex /status` shows). No configuration.
 - **Burn rate** and a **per‑minute sparkline** for the last hour.
 - An **exact per‑model table** (input / output / cache read / cache write).
 
