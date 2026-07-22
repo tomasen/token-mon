@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""claude-mon: live local dashboard for Claude Code subscription usage.
+"""token-mon: live local dashboard for AI-coding subscription usage
+(Claude Code + OpenAI Codex).
 
 Two local data sources, no third-party services:
 
@@ -799,18 +800,18 @@ def main():
     STATE = State(scanner, usage, args, plan_label, fallback_limit,
                   codex_scanner, codex_usage)
 
-    print(f"claude-mon: plan={plan_label} · claude-code/{version} · scanning {root}")
+    print(f"token-mon: plan={plan_label} · claude-code/{version} · scanning {root}")
     scanner.scan()
-    print(f"claude-mon: {len(scanner.events)} usage events from {scanner.files_tracked} transcripts")
+    print(f"token-mon: {len(scanner.events)} usage events from {scanner.files_tracked} transcripts")
     if not args.no_usage:
         usage.poll()
         d = usage.snapshot()
         if d.get("ok"):
-            print(f"claude-mon: official session={d['session']['pct']}% "
+            print(f"token-mon: official session={d['session']['pct']}% "
                   f"weekly={d['weekly_all']['pct']}% "
                   f"(calibrated limit ~{int(d['session_limit_calibrated'] or 0):,} tok)")
         else:
-            print(f"claude-mon: official usage unavailable ({d.get('error')}); using estimate")
+            print(f"token-mon: official usage unavailable ({d.get('error')}); using estimate")
 
     threading.Thread(target=usage.run, daemon=True).start()
     threading.Thread(target=codex_usage.run, daemon=True).start()
@@ -828,7 +829,7 @@ def main():
     threading.Thread(target=scan_loop, daemon=True).start()
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"claude-mon: dashboard at http://{args.host}:{args.port}")
+    print(f"token-mon: dashboard at http://{args.host}:{args.port}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

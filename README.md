@@ -1,4 +1,4 @@
-# claude-mon
+# token-mon
 
 **A live, local dashboard for your Claude Code / Claude subscription usage — and
 your OpenAI Codex CLI usage too.** Exact token counts and your official limit
@@ -6,7 +6,7 @@ percentages, ticking in real time — no API keys, no third‑party services, no
 leaves your machine.
 
 <p align="center">
-  <img src="docs/screenshot-dark.png" alt="claude-mon dashboard" width="420">
+  <img src="docs/screenshot-dark.png" alt="token-mon dashboard" width="420">
 </p>
 
 ## What it shows
@@ -31,28 +31,28 @@ refresh.
 ## How it works (two local sources, zero network egress of your data)
 
 1. **Transcripts** — Claude Code writes every turn to `~/.claude/projects/**/*.jsonl`
-   with exact token usage. claude-mon tails these for live, per‑model counts.
+   with exact token usage. token-mon tails these for live, per‑model counts.
 2. **Claude Code's own usage endpoint** — called locally with the OAuth token
    already in `~/.claude/.credentials.json` and the `claude-code` User‑Agent (the
    same call the built‑in `/usage` makes). It returns your **official** session /
    weekly / per‑model utilization and reset times.
 
 Anthropic doesn't publish the raw token *limits*, only coarse percentages. So
-claude-mon **calibrates**: it anchors your exact token count to the official
+token-mon **calibrates**: it anchors your exact token count to the official
 percentage, giving you a precise, ticking number that stays true to the official
 figure. Your plan (Pro / Max 5x / Max 20x) is auto‑detected from your credentials.
 
 ## Requirements
 
 - **Python 3.8+** — standard library only, nothing to `pip install`.
-- **Claude Code** installed and logged in **on the same machine** (claude-mon
+- **Claude Code** installed and logged in **on the same machine** (token-mon
   reads its local files; it must run where Claude Code runs).
 
 ## Quick start
 
 ```bash
-git clone https://github.com/tomasen/claude-mon.git
-cd claude-mon
+git clone https://github.com/tomasen/token-mon.git
+cd token-mon
 python3 server.py
 ```
 
@@ -65,7 +65,7 @@ official usage, and starts ticking. `Ctrl‑C` stops it. Force a theme with
 Using Claude Code, Codex CLI, or any AI coding agent? Paste this prompt and
 you're done:
 
-> Install claude-mon from https://github.com/tomasen/claude-mon — clone the
+> Install token-mon from https://github.com/tomasen/token-mon — clone the
 > repo, start its server, and confirm the dashboard loads at
 > http://127.0.0.1:8420. Then set it up to start automatically on boot
 > (systemd, launchd, or whatever this machine uses) so it runs permanently.
@@ -77,14 +77,14 @@ running, install the included **systemd user service** (no root needed):
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp claude-mon.service ~/.config/systemd/user/     # edit paths if you didn't clone to ~/claude-mon
+cp token-mon.service ~/.config/systemd/user/     # edit paths if you didn't clone to ~/token-mon
 systemctl --user daemon-reload
-systemctl --user enable --now claude-mon
+systemctl --user enable --now token-mon
 loginctl enable-linger "$USER"                    # keep running after logout / across reboots
 ```
 
-Manage it: `systemctl --user status claude-mon` · `journalctl --user -u claude-mon -f`
-· disable with `systemctl --user disable --now claude-mon`.
+Manage it: `systemctl --user status token-mon` · `journalctl --user -u token-mon -f`
+· disable with `systemctl --user disable --now token-mon`.
 
 ## Configuration
 
@@ -107,7 +107,7 @@ Manage it: `systemctl --user status claude-mon` · `journalctl --user -u claude-
 
 ## Privacy & caveats
 
-- **Everything is computed locally.** claude-mon serves only to `127.0.0.1` by
+- **Everything is computed locally.** token-mon serves only to `127.0.0.1` by
   default. Don't bind it to a public interface — it displays your usage.
 - It calls Claude Code's **unofficial** OAuth usage endpoint (read‑only, your own
   token, polled about once a minute). This is the same data `/usage` shows; use at
@@ -117,7 +117,7 @@ Manage it: `systemctl --user status claude-mon` · `journalctl --user -u claude-
 
 ## Built by Claude, watching itself
 
-claude-mon was built end‑to‑end in a single Claude Code session — about **450
+token-mon was built end‑to‑end in a single Claude Code session — about **450
 assistant turns** and **~110M tokens** (mostly cache reads of the ever‑growing
 context; ~1.3M of them actual output) — with the dashboard running the whole time,
 watching its own construction eat into the session and weekly limits.

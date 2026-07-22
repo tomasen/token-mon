@@ -1,0 +1,23 @@
+# systemd *user* service for token-mon — no root required.
+# Assumes you cloned to ~/token-mon; edit the two paths below if not.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp token-mon.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now token-mon
+#   loginctl enable-linger "$USER"     # keep running after logout / across reboots
+
+[Unit]
+Description=token-mon — live Claude Code usage dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/token-mon
+ExecStart=/usr/bin/env python3 %h/token-mon/server.py --port 8420
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

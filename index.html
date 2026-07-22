@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claude-mon — live usage</title>
+<title>token-mon — live usage</title>
 <style>
   :root {
     --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
@@ -126,7 +126,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>claude-mon</h1>
+    <h1>token-mon</h1>
     <span class="chip"><span class="dot" id="livedot"></span><span id="livetext">connecting…</span></span>
     <span class="chip" id="planchip">—</span>
     <span class="chip" id="srcchip">—</span>
@@ -136,8 +136,8 @@
   <!-- THIS WEEK — total, limit %, and by-model breakdown, all in one card -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · This week</div><div class="reset" id="wkReset"></div></div>
-    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens used</span></div>
-    <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit</small></div>
+    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens · this machine</span></div>
+    <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit · whole account</small></div>
     <div class="meter"><div class="fill" id="wkFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="wkModelWrap"></div>
@@ -146,8 +146,8 @@
   <!-- LAST 5 HOURS — same shape -->
   <div class="card">
     <div class="row-between"><div class="label">Claude · Last 5 hours</div><div class="reset" id="sessReset"></div></div>
-    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens used</span></div>
-    <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit</small></div>
+    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens · this machine</span></div>
+    <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit · whole account</small></div>
     <div class="meter"><div class="fill" id="sessFill"></div></div>
     <div class="bymodel-head">by model</div>
     <div id="modelWrap"></div>
@@ -156,8 +156,8 @@
   <!-- CODEX (OpenAI) — same shape, shown when Codex is installed -->
   <div class="card" id="cxCard" style="display:none">
     <div class="row-between"><div class="label">Codex · <span id="cxPlan">–</span></div><div class="reset" id="cxReset"></div></div>
-    <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit">tokens used</span></div>
-    <div class="hero-pct">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit</small></div>
+    <div class="hero-num"><span class="od" id="cxTok"></span><span class="unit">tokens · this machine</span></div>
+    <div class="hero-pct">≈<span id="cxPctV">–</span>%<small> of your <span id="cxWin">weekly</span> limit · whole account</small></div>
     <div class="meter"><div class="fill" id="cxFill"></div></div>
     <div class="bymodel-head" id="cxByHead" style="display:none">by model</div>
     <div id="cxModelWrap"></div>
@@ -201,7 +201,7 @@
   </details>
   <footer>
     <div>Read locally from Claude Code &amp; Codex — nothing leaves your machine.</div>
-    <a class="ghlink" href="https://github.com/tomasen/claude-mon" target="_blank" rel="noopener">Powered by <b>claude-mon</b> · open source on GitHub&nbsp;↗</a>
+    <a class="ghlink" href="https://github.com/tomasen/token-mon" target="_blank" rel="noopener">Powered by <b>token-mon</b> · open source on GitHub&nbsp;↗</a>
   </footer>
 </div>
 
