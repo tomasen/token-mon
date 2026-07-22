@@ -1,0 +1,5 @@
+claude-mon.log
+*.log
+__pycache__/
+*.pyc
+.DS_Store

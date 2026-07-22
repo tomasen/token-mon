@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-mon — live usage</title>
+<style>
+  :root {
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,0.10);
+    --accent:#2a78d6; --accent-wash:rgba(42,120,214,0.10); --track:#cde2fb;
+    --warning:#fab219; --critical:#d03b3b; --good:#0ca30c;
+    --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300; --s5:#4a3aa7; --s6:#e34948; --s7:#e87ba4; --s8:#eb6834;
+  }
+  :root[data-theme="dark"] {
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+    --accent:#3987e5; --accent-wash:rgba(57,135,229,0.12); --track:#16324f;
+    --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,0.10);
+      --accent:#3987e5; --accent-wash:rgba(57,135,229,0.12); --track:#16324f;
+      --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300; --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
+    }
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { max-width:100%; overflow-x:hidden; }
+  body { background:var(--page); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; padding:20px; }
+  .wrap { max-width:900px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1fr); gap:14px; min-width:0; }
+
+  header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  header h1 { font-size:18px; font-weight:600; }
+  .chip { font-size:12px; color:var(--ink-2); border:1px solid var(--border); border-radius:999px; padding:2px 9px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .chip.ok { color:var(--good); } .chip.est { color:var(--warning); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  .dot.live { background:var(--good); animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  header .meta { margin-left:auto; font-size:12px; color:var(--muted); }
+
+  /* info disclosure (technical detail, opt-in) */
+  details.info { margin-top:2px; }
+  details.info summary { list-style:none; cursor:pointer; font-size:12px; color:var(--muted);
+    border:1px solid var(--border); border-radius:999px; padding:3px 11px; display:flex; gap:6px; align-items:center; width:max-content; margin:0 auto; }
+  details.info summary::-webkit-details-marker { display:none; }
+  details.info[open] summary { color:var(--ink); background:var(--surface); }
+  .info-body { margin-top:10px; font-size:12.5px; color:var(--ink-2); line-height:1.65; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:15px; }
+  .info-body b { color:var(--ink); } .info-body p { margin-bottom:9px; } .info-body p:last-child { margin-bottom:0; }
+  .info-body code { font-family:ui-monospace,monospace; font-size:11.5px; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; min-width:0; }
+  .label { font-size:13px; color:var(--ink-2); font-weight:600; }
+  .row-between { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .reset { font-size:12.5px; color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  /* odometer — every digit rolls UP only */
+  .od { display:inline-flex; align-items:flex-start; height:1em; overflow:hidden; line-height:1; font-variant-numeric:tabular-nums; max-width:100%; }
+  .od-col { height:1em; width:.60em; overflow:hidden; flex:none; }
+  .od-strip { display:flex; flex-direction:column; will-change:transform; }
+  .od-strip span { height:1em; display:block; text-align:center; }
+  .od-sep { text-align:center; padding:0 .02em; flex:none; }
+
+  /* limit cards (this week / last 5 hours) — % is the hero, marked approximate */
+  /* limit cards lead with the exact token count (hero); % rides below, smaller —
+     same visual language as the by-model card. */
+  .hero-num { display:flex; align-items:flex-end; font-weight:600; margin:8px 0 2px; font-size:clamp(30px,9.5vw,50px); max-width:100%; }
+  .hero-num .od { font-size:inherit; color:var(--ink); }
+  .unit { font-size:.30em; font-weight:600; color:var(--muted); margin-left:.4em; margin-bottom:.26em; letter-spacing:.02em; white-space:nowrap; }
+  .hero-pct { font-size:14px; color:var(--ink-2); font-variant-numeric:tabular-nums; margin:3px 0 14px; }
+  .hero-pct small { color:var(--muted); font-weight:400; }
+  .meter { height:10px; border-radius:5px; background:var(--track); overflow:hidden; }
+  .meter.sm { height:7px; }
+  .meter .fill { height:100%; width:0%; background:var(--accent); border-radius:5px; transition:width .5s cubic-bezier(.22,1,.36,1), background-color .4s; }
+  .meter .fill.warn { background:var(--warning); } .meter .fill.crit { background:var(--critical); }
+  /* in-card by-model breakdown — number is the hero, % always on its own line */
+  .bymodel-head { margin-top:18px; padding-top:13px; border-top:1px solid var(--grid); font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .mt-swatch { width:10px; height:10px; border-radius:2px; flex:none; background:var(--mc,var(--accent)); }
+  .mt-barwrap { height:8px; background:var(--track); border-radius:4px; overflow:hidden; margin-top:9px; }
+  .mt-barwrap.big { height:11px; border-radius:6px; }
+  .mt-bar { height:100%; width:0%; border-radius:6px; background:var(--mc,var(--accent)); transition:width .6s cubic-bezier(.22,1,.36,1); }
+
+  .mitem { padding:14px 0 4px; padding-left:14px; border-top:1px solid var(--grid); }
+  .mitem:first-child { border-top:none; padding-top:4px; }
+  .mitem.feat { border-left:3px solid var(--mc); }
+  .mi-name { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-2); }
+  .mitem.feat .mi-name { font-size:14px; color:var(--ink); font-weight:600; }
+  .mi-tag { font-size:10px; font-weight:600; color:var(--mc,var(--accent)); border:1px solid currentColor; border-radius:999px; padding:1px 7px; text-transform:uppercase; letter-spacing:.04em; }
+  .mi-num { margin-top:3px; }
+  .mi-num .od { font-weight:600; color:var(--ink); font-size:clamp(23px,6.8vw,31px); }
+  .mitem.feat .mi-num .od { font-size:clamp(32px,10vw,52px); }
+  .mi-pct { margin-top:3px; font-size:12.5px; color:var(--ink-2); font-variant-numeric:tabular-nums; }  /* always its own line */
+  .mitem.feat .mi-pct { font-size:14px; }
+  .mi-pct small { color:var(--muted); font-weight:400; margin-left:3px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  .tile .value { font-size:22px; font-weight:600; }
+  .tile .aux { margin-top:4px; font-size:12px; color:var(--muted); }
+
+  .spark-head { margin-bottom:8px; }
+  .spark-head .cur { font-size:12px; color:var(--muted); margin-top:3px; }
+  .sparkwrap { position:relative; } .sparkwrap svg { display:block; width:100%; height:84px; }
+  .tooltip { position:absolute; pointer-events:none; display:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:12px; box-shadow:0 2px 10px rgba(0,0,0,.12); white-space:nowrap; z-index:2; }
+  .tooltip .t2 { color:var(--muted); }
+
+  details.tbl summary { font-size:12px; color:var(--muted); cursor:pointer; margin-top:6px; }
+  .tblscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:12px; min-width:440px; }
+  th { text-align:right; color:var(--ink-2); font-weight:500; padding:4px 8px; border-bottom:1px solid var(--grid); white-space:nowrap; }
+  th:first-child, td:first-child { text-align:left; }
+  td { text-align:right; padding:4px 8px; font-variant-numeric:tabular-nums; border-bottom:1px solid var(--grid); white-space:nowrap; }
+  footer { font-size:11px; color:var(--muted); line-height:1.6; text-align:center; display:grid; gap:8px; justify-items:center; margin-top:2px; }
+  .ghlink { color:var(--ink-2); text-decoration:none; border:1px solid var(--border); border-radius:999px; padding:5px 13px; display:inline-flex; gap:6px; align-items:center; }
+  .ghlink:hover { color:var(--ink); background:var(--surface); }
+  .ghlink b { font-weight:600; }
+
+  @media (max-width:560px) {
+    body { padding:13px; }
+    .wrap { gap:11px; }
+    .card { padding:15px; }
+    header .meta { display:none; }
+    .mitem { padding-left:12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>claude-mon</h1>
+    <span class="chip"><span class="dot" id="livedot"></span><span id="livetext">connecting…</span></span>
+    <span class="chip" id="planchip">—</span>
+    <span class="chip" id="srcchip">—</span>
+    <span class="meta" id="meta"></span>
+  </header>
+
+  <!-- THIS WEEK — total, limit %, and by-model breakdown, all in one card -->
+  <div class="card">
+    <div class="row-between"><div class="label">This week</div><div class="reset" id="wkReset"></div></div>
+    <div class="hero-num"><span class="od" id="wkTok"></span><span class="unit">tokens used</span></div>
+    <div class="hero-pct">≈<span id="wkPctV">–</span>%<small> of your weekly limit</small></div>
+    <div class="meter"><div class="fill" id="wkFill"></div></div>
+    <div class="bymodel-head">by model</div>
+    <div id="wkModelWrap"></div>
+  </div>
+
+  <!-- LAST 5 HOURS — same shape -->
+  <div class="card">
+    <div class="row-between"><div class="label">Last 5 hours</div><div class="reset" id="sessReset"></div></div>
+    <div class="hero-num"><span class="od" id="sessTok"></span><span class="unit">tokens used</span></div>
+    <div class="hero-pct">≈<span id="sessPctV">–</span>%<small> of your 5-hour limit</small></div>
+    <div class="meter"><div class="fill" id="sessFill"></div></div>
+    <div class="bymodel-head">by model</div>
+    <div id="modelWrap"></div>
+  </div>
+
+  <div class="card">
+    <div class="spark-head"><div class="label">Tokens per minute — last hour</div><div class="cur"><span id="sparkcur"></span> · burn <span id="burn">–</span>/min</div></div>
+    <div class="sparkwrap" id="sparkwrap"><svg id="spark" preserveAspectRatio="none"></svg><div class="tooltip" id="tip"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Exact token counts</div>
+    <details class="tbl" open>
+      <summary>last 5 hours, by model</summary>
+      <div class="tblscroll">
+        <table id="mtable"><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th><th>Total</th></tr></thead><tbody></tbody></table>
+      </div>
+    </details>
+  </div>
+
+  <details class="info">
+    <summary>ⓘ How to read this</summary>
+    <div class="info-body">
+      <p><b>The windows.</b> “This week” and “Last 5 hours” are rolling usage windows that count
+      <b>everything you send to Claude</b> — across every chat, task and tool, not just one conversation.
+      Each one refills at the reset time shown.</p>
+      <p><b>How accurate.</b> <b>Token counts are exact</b> — read straight from Claude Code's own logs.
+      <b>Percentages are approximate</b> (shown with “≈”): Anthropic doesn't publish the exact limits, so we
+      take the official percentage Claude reports and sharpen it with your exact token counts.</p>
+      <p><b>Per-model %.</b> Each model shows how much of the limit that actually constrains it you've used —
+      its own weekly cap if it has one, otherwise its use of the shared window quota. Not a share of tokens.</p>
+      <p><b>Private.</b> Everything is computed locally from <code>~/.claude</code>; nothing leaves your machine.</p>
+    </div>
+  </details>
+  <footer>
+    <div>Read locally from Claude Code — nothing leaves your machine.</div>
+    <a class="ghlink" href="https://github.com/tomasen/claude-mon" target="_blank" rel="noopener">Powered by <b>claude-mon</b> · open source on GitHub&nbsp;↗</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+{
+  const t = new URLSearchParams(location.search).get("theme");
+  if (t === "dark" || t === "light") document.documentElement.dataset.theme = t;
+}
+const el = id => document.getElementById(id);
+const fmt = n => Math.round(Math.max(0, n)).toLocaleString("en-US");
+const compact = n => n>=1e9?(n/1e9).toFixed(2)+"B":n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e4?(n/1e3).toFixed(0)+"K":fmt(n);
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const SERIES = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+
+/* -------- Odometer: every digit rolls UPWARD only -------- */
+class Odometer {
+  constructor(node){ this.node=node; this.cols=[]; this.str=null; }
+  _build(str){
+    this.node.innerHTML=""; this.cols=[];
+    const digitCount=(str.match(/\d/g)||[]).length;
+    let di=0;
+    for(const ch of str){
+      if(ch>="0"&&ch<="9"){
+        const col=document.createElement("span"); col.className="od-col";
+        const strip=document.createElement("span"); strip.className="od-strip";
+        for(let d=0;d<=10;d++){ const s=document.createElement("span"); s.textContent=d%10; strip.appendChild(s); }
+        col.appendChild(strip); this.node.appendChild(col);
+        // higher place-value wheels roll slower, so a change cascades from the
+        // low digits upward instead of every digit moving in lockstep.
+        const idxFromRight=digitCount-1-di;
+        this.cols.push({strip, acc:0, dpos:0, lt:0, init:false, speed:Math.max(0.6, Math.pow(0.93, idxFromRight))});
+        di++;
+      } else {
+        const sep=document.createElement("span"); sep.className="od-sep"; sep.textContent=ch;
+        this.node.appendChild(sep); this.cols.push(null);
+      }
+    }
+  }
+  set(str){
+    if(!this.cols.length || !this.str || str.length!==this.str.length) this._build(str);
+    this.str=str;
+    let i=0;
+    for(const ch of str){
+      const col=this.cols[i++]; if(!col) continue;
+      const t=ch.charCodeAt(0)-48;
+      if(!col.init){ col.lt=t; col.acc=t; col.dpos=t; col.init=true; }
+      else { col.acc += ((t-col.lt)%10+10)%10; col.lt=t; }   // forward steps only, rolls through
+    }
+  }
+  snap(){ this.str=null; }
+  tick(ease){
+    for(const col of this.cols){
+      if(!col) continue;
+      const e=Math.min(1, ease*col.speed);
+      col.dpos += (col.acc-col.dpos)*e;
+      if(col.acc-col.dpos < 0.0015) col.dpos=col.acc;    // settle to a clean digit at rest
+      const v=((col.dpos%10)+10)%10;
+      col.strip.style.transform=`translateY(-${v}em)`;
+    }
+  }
+}
+
+const wkTok = new Odometer(el("wkTok"));
+const sessTok = new Odometer(el("sessTok"));
+const st5h = {ods:{}, key:""};   // by-model odometers, last 5 hours
+const stWk = {ods:{}, key:""};   // by-model odometers, this week
+let snap=null, lastFrame=0, lastSessionStart=null, lastWeekStart=null;
+let wkTokVal=0, sessTokVal=0;   // eased numerics, drive the smooth ticking %
+
+function sevClass(sev, pct){
+  if(sev==="critical"||pct>=90) return "crit";
+  if(sev==="warning"||pct>=70) return "warn";
+  return "";
+}
+
+function onSnapshot(s){
+  snap=s;
+  const off=s.official||{}, sess=s.session||{}, week=s.week||{};
+
+  el("livedot").className="dot"+(s.burn.perMin>0?" live":"");
+  el("livetext").textContent = sess.tokens.total>0 ? "live" : "idle";
+  el("planchip").textContent = s.plan.label;
+  const src=el("srcchip");
+  if(off.ok){ src.className="chip ok"; src.textContent="official ✓"; }
+  else { src.className="chip est"; src.textContent="estimate"; }
+  el("meta").textContent=`${s.meta.files} transcripts · ${fmt(s.meta.events)} msgs`;
+
+  if(week.start!==lastWeekStart){
+    lastWeekStart=week.start; wkTok.snap(); wkTokVal=week.tokens.total;
+    for(const k in stWk.ods) stWk.ods[k].od.snap();
+  }
+  if(sess.start!==lastSessionStart){
+    lastSessionStart=sess.start; sessTok.snap(); sessTokVal=sess.tokens.total;
+    for(const k in st5h.ods) st5h.ods[k].od.snap();
+  }
+
+  // THIS WEEK — token total is the hero, % ticks below (frame loop), breakdown in-card
+  wkTok.set(fmt(week.tokens.total));
+  const wpct = week.pct==null ? 0 : week.pct;
+  const wf=el("wkFill"); wf.className="fill "+sevClass(week.severity, wpct); wf.style.width=Math.min(100,wpct)+"%";
+  renderModelTickers("wkModelWrap", week.models||[], stWk, {limit:week.limit, total:week.tokens.total, scoped:week.scoped||[], noun:"weekly"});
+
+  // LAST 5 HOURS — same shape
+  sessTok.set(fmt(sess.tokens.total));
+  const spct = sess.pct==null ? 0 : sess.pct;
+  const sf=el("sessFill"); sf.className="fill "+sevClass(off.session&&off.session.severity, spct); sf.style.width=Math.min(100,spct)+"%";
+  renderModelTickers("modelWrap", sess.models||[], st5h, {limit:sess.limit, total:sess.tokens.total, scoped:[], noun:"5-hour"});
+
+  el("burn").textContent = s.burn.perMin>=1 ? fmt(s.burn.perMin) : "0";
+  renderSpark(s.spark);
+  renderTable(sess.models||[]);
+}
+
+// Renders a by-model breakdown into `wrapId`, tracking odometers in `st`.
+// Used identically for the weekly and last-5-hours cards.
+function renderModelTickers(wrapId, models, st, opts){
+  const {limit, total, scoped=[], noun}=opts;
+  const key=models.map(m=>m.id).join("|");
+  const wrap=el(wrapId);
+  if(key!==st.key){
+    st.key=key; st.ods={}; wrap.innerHTML="";
+    models.forEach((m,i)=>{
+      const color=`var(${SERIES[i%SERIES.length]})`;
+      const row=document.createElement("div");
+      row.className="mitem"+(i===0?" feat":"");
+      row.style.setProperty("--mc", color);
+      row.innerHTML=`
+        <div class="mi-name"><span class="mt-swatch"></span>${esc(m.model)}${i===0?'<span class="mi-tag">most used</span>':''}</div>
+        <div class="mi-num"><span class="od"></span></div>
+        <div class="mi-pct"></div>
+        <div class="mt-barwrap${i===0?' big':''}"><div class="mt-bar"></div></div>`;
+      wrap.appendChild(row);
+      st.ods[m.id]={ od:new Odometer(row.querySelector(".mi-num .od")), pct:row.querySelector(".mi-pct"), bar:row.querySelector(".mt-bar") };
+    });
+  }
+  for(const m of models){
+    const o=st.ods[m.id]; if(!o) continue;
+    o.od.set(fmt(m.total));
+    // Percentage = usage against the limit that actually constrains this model
+    // (what you're ABLE to use): a model with its own scoped cap → that official
+    // cap; otherwise its consumption of the shared window quota.
+    const sc = scoped.find(x => x && x.model && (
+      String(m.id).toLowerCase().includes(String(x.model).toLowerCase()) ||
+      String(m.model).toLowerCase().includes(String(x.model).toLowerCase())));
+    let pct, label;
+    if(sc && sc.pct!=null){ pct=sc.pct; label=`of your ${esc(sc.model)} weekly cap`; }
+    else if(limit){ pct=m.total/limit*100; label=`of your ${noun} limit`; }
+    else { pct = total>0 ? m.total/total*100 : 0; label=`of ${noun} tokens`; }  // estimate fallback
+    o.pct.innerHTML = `≈${pct.toFixed(1)}%<small>${label}</small>`;
+    o.bar.style.width = Math.min(100, Math.max(1, pct))+"%";
+  }
+}
+
+function renderTable(models){
+  el("mtable").querySelector("tbody").innerHTML = models.map(m=>
+    `<tr><td>${esc(m.model)}</td><td>${fmt(m.in)}</td><td>${fmt(m.out)}</td><td>${fmt(m.cw)}</td><td>${fmt(m.cr)}</td><td>${fmt(m.total)}</td></tr>`
+  ).join("") || `<tr><td colspan="6">no usage yet</td></tr>`;
+}
+
+/* -------- animation loop -------- */
+function frame(t){
+  requestAnimationFrame(frame);
+  const dt=Math.min(0.1,(t-lastFrame)/1000||0.016); lastFrame=t;
+  const ease=Math.min(1, dt*3);   // slower than default so the roll is visible, but still settles to read
+  if(snap){
+    const wk=snap.week, ss=snap.session;
+    wkTokVal += (wk.tokens.total-wkTokVal)*ease; if(Math.abs(wk.tokens.total-wkTokVal)<1) wkTokVal=wk.tokens.total;
+    sessTokVal += (ss.tokens.total-sessTokVal)*ease; if(Math.abs(ss.tokens.total-sessTokVal)<1) sessTokVal=ss.tokens.total;
+    el("wkPctV").textContent   = wk.limit ? (wkTokVal/wk.limit*100).toFixed(4) : "–";
+    el("sessPctV").textContent = ss.limit ? (sessTokVal/ss.limit*100).toFixed(4) : "–";
+    updateCountdowns();
+  }
+  wkTok.tick(ease); sessTok.tick(ease);
+  for(const k in st5h.ods) st5h.ods[k].od.tick(ease);
+  for(const k in stWk.ods) stWk.ods[k].od.tick(ease);
+}
+function fmtCountdown(iso){
+  if(!iso) return "";
+  const r=(new Date(iso)-Date.now())/1000;
+  if(r<=0) return "resetting…";
+  const d=Math.floor(r/86400), h=Math.floor(r%86400/3600), m=Math.floor(r%3600/60), s=Math.floor(r%60);
+  if(d>0) return `resets in ${d}d ${h}h`;
+  return `resets in ${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+function updateCountdowns(){
+  const off=snap.official||{}, week=snap.week||{};
+  el("wkReset").textContent = fmtCountdown(week.resets_at);
+  el("sessReset").textContent = off.ok&&off.session ? fmtCountdown(off.session.resets_at)
+    : (snap.session.end ? fmtCountdown(snap.session.end) : "");
+}
+requestAnimationFrame(frame);
+
+/* -------- sparkline -------- */
+const svg=el("spark"), tip=el("tip"), sparkwrap=el("sparkwrap");
+let sparkData=[]; const SW=800,SH=84,PAD=4;
+function pts(data){ const mx=Math.max(1,...data); return data.map((v,i)=>[PAD+i/(data.length-1)*(SW-2*PAD), SH-PAD-v/mx*(SH-2*PAD)]); }
+function renderSpark(data){
+  sparkData=data; svg.setAttribute("viewBox",`0 0 ${SW} ${SH}`);
+  const p=pts(data), line=p.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1)).join(" ");
+  const last=p[p.length-1];
+  svg.innerHTML=`<line x1="${PAD}" y1="${SH-PAD}" x2="${SW-PAD}" y2="${SH-PAD}" stroke="var(--baseline)"/>`+
+    `<path d="${line} L ${last[0].toFixed(1)} ${SH-PAD} L ${p[0][0].toFixed(1)} ${SH-PAD} Z" fill="var(--accent-wash)"/>`+
+    `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`+
+    `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/><g id="hl"></g>`;
+  el("sparkcur").textContent=`now: ${fmt(data[data.length-1])} tok/min`;
+}
+sparkwrap.addEventListener("mousemove",e=>{
+  if(!sparkData.length) return;
+  const r=sparkwrap.getBoundingClientRect(), frac=Math.min(1,Math.max(0,(e.clientX-r.left)/r.width));
+  const i=Math.round(frac*(sparkData.length-1)), p=pts(sparkData), [px,py]=p[i];
+  const hl=svg.querySelector("#hl");
+  if(hl) hl.innerHTML=`<line x1="${px}" y1="${PAD}" x2="${px}" y2="${SH-PAD}" stroke="var(--grid)"/><circle cx="${px}" cy="${py}" r="4.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>`;
+  const ago=sparkData.length-1-i;
+  tip.style.display="block";
+  tip.innerHTML=`<strong>${fmt(sparkData[i])}</strong> tokens <span class="t2">· ${ago===0?"this minute":ago+" min ago"}</span>`;
+  tip.style.left=Math.min(r.width-tip.offsetWidth-4,Math.max(4,px/SW*r.width+10))+"px"; tip.style.top="4px";
+});
+sparkwrap.addEventListener("mouseleave",()=>{ tip.style.display="none"; const hl=svg.querySelector("#hl"); if(hl) hl.innerHTML=""; });
+
+/* -------- data: eager first paint, then live SSE -------- */
+fetch("/api/state").then(r=>r.json()).then(onSnapshot).catch(()=>{});
+(function connect(){
+  const es=new EventSource("/events");
+  es.onmessage=e=>onSnapshot(JSON.parse(e.data));
+  es.onerror=()=>{ el("livedot").className="dot"; el("livetext").textContent="reconnecting…"; };
+})();
+</script>
+</body>
+</html>
