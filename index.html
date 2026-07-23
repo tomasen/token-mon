@@ -135,7 +135,6 @@
     <h1>token-mon</h1>
     <span class="chip"><span class="dot" id="livedot"></span><span id="livetext">connecting…</span></span>
     <span class="chip" id="planchip">—</span>
-    <span class="chip" id="srcchip">—</span>
     <span class="meta" id="meta"></span>
   </header>
 
@@ -299,9 +298,6 @@ function onSnapshot(s){
   el("livedot").className="dot"+(s.burn.perMin>0?" live":"");
   el("livetext").textContent = sess.tokens.total>0 ? "live" : "idle";
   el("planchip").textContent = s.plan.label;
-  const src=el("srcchip");
-  if(off.ok){ src.className="chip ok"; src.textContent="official ✓"; }
-  else { src.className="chip est"; src.textContent="estimate"; }
   el("meta").textContent=`${s.meta.files} transcripts · ${fmt(s.meta.events)} msgs`;
 
   if(week.start!==lastWeekStart){
