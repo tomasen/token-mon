@@ -224,6 +224,8 @@
 const el = id => document.getElementById(id);
 const fmt = n => Math.round(Math.max(0, n)).toLocaleString("en-US");
 const compact = n => n>=1e9?(n/1e9).toFixed(2)+"B":n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e4?(n/1e3).toFixed(0)+"K":fmt(n);
+// percentages: up to `d` decimals, trailing zeros trimmed (76.0000 -> 76, 49.0840 -> 49.084)
+const fmtPct = (v, d=4) => Number(v).toFixed(d).replace(/(\.\d*?)0+$/,"$1").replace(/\.$/,"");
 const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 const SERIES = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
 
@@ -367,7 +369,7 @@ function renderModelTickers(wrapId, models, st, opts){
     if(sc && sc.pct!=null){ pct=sc.pct; label=`of your ${esc(sc.model)} weekly cap`; }
     else if(limit){ pct=v/limit*100; label=`of your ${noun} limit`; }
     else { pct = total>0 ? m.total/total*100 : 0; label=`of ${noun} tokens`; }
-    o.pct.innerHTML = `≈${pct.toFixed(1)}%<small>${label}</small>`;
+    o.pct.innerHTML = `≈${fmtPct(pct,1)}%<small>${label}</small>`;
     o.bar.style.width = Math.min(100, Math.max(1, pct))+"%";
   }
 }
@@ -384,7 +386,7 @@ function renderCodex(cx){
   cxTok.set(est ? fmt(est.tokens) : "–");
   cxEstState = est;
   const pct = est ? est.pct : (w.pct==null?0:w.pct);
-  el("cxPctV").textContent=Number(pct).toFixed(4);
+  el("cxPctV").textContent=fmtPct(pct);
   const f=el("cxFill"); f.className="fill "+sevClass(null,pct); f.style.width=Math.min(100,pct)+"%";
   const models=cx.models||[];
   el("cxByHead").style.display = models.length ? "" : "none";
@@ -411,7 +413,7 @@ function renderCodex(cx){
     o.od.set(fmt(m.estTotal!=null ? m.estTotal : m.total));
     if(m.pct!=null){
       o.pct.style.display="";
-      o.pct.innerHTML=`≈${Number(m.pct).toFixed(1)}%<small>${esc(m.pctLabel||"of its cap")}</small>`;
+      o.pct.innerHTML=`≈${fmtPct(m.pct,1)}%<small>${esc(m.pctLabel||"of its cap")}</small>`;
       o.bar.parentElement.style.display="";
       o.bar.style.width=Math.min(100,Math.max(1,m.pct))+"%";
     } else {
@@ -437,8 +439,8 @@ function frame(t){
     const wt=(wk.est||{}).tokens||0, st5=(ss.est||{}).tokens||0;
     wkTokVal += (wt-wkTokVal)*ease; if(Math.abs(wt-wkTokVal)<1) wkTokVal=wt;
     sessTokVal += (st5-sessTokVal)*ease; if(Math.abs(st5-sessTokVal)<1) sessTokVal=st5;
-    el("wkPctV").textContent   = (wk.est&&wk.est.limit) ? (wkTokVal/wk.est.limit*100).toFixed(4) : "–";
-    el("sessPctV").textContent = (ss.est&&ss.est.limit) ? (sessTokVal/ss.est.limit*100).toFixed(4) : "–";
+    el("wkPctV").textContent   = (wk.est&&wk.est.limit) ? fmtPct(wkTokVal/wk.est.limit*100) : "–";
+    el("sessPctV").textContent = (ss.est&&ss.est.limit) ? fmtPct(sessTokVal/ss.est.limit*100) : "–";
     updateCountdowns();
   }
   wkTok.tick(ease); sessTok.tick(ease); cxTok.tick(ease);
